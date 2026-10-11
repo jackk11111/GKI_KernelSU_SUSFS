@@ -1,0 +1,65 @@
+name: Lunaris annibale official boot read-only audit
+on:
+  push:
+    branches: [evox-annibale-6.6.144-ksun-susfs]
+    paths: [.github/workflows/lunaris-annibale-boot-audit.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  extract-lunaris-boot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Reclaim disk space for 5.17GB OTA
+        shell: bash
+        run: |
+          set -euo pipefail
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/hostedtoolcache/CodeQL /usr/local/share/powershell || true
+          df -h /
+      - name: Install payload dumper
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.27.x'
+      - name: Install official payload-dumper-go
+        shell: bash
+        run: |
+          set -euo pipefail
+          go install github.com/ssut/payload-dumper-go@latest
+          "$HOME/go/bin/payload-dumper-go" -h | head -45 || true
+      - name: Download and verify official LunarisOS GMS OTA
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://downloads.sourceforge.net/project/ghosuto/annibale/Lunaris-AOSP-annibale-OFFICIAL-3.12-GMS-2026093005.zip'
+          SHA='4e7f5530ec22b0f461d045f269df58d810cbec333481d80efc3619852b94789c'
+          curl -fL --retry 3 --retry-all-errors --connect-timeout 30 --max-time 3600 \
+            -A 'Mozilla/5.0 (compatible; Lunaris-read-only-boot-audit)' \
+            "$URL" -o lunaris-official.zip
+          echo "$SHA  lunaris-official.zip" | sha256sum -c -
+          unzip -t lunaris-official.zip | tail -3
+      - name: Extract read-only boot partitions and inspect KMI
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p report
+          "$HOME/go/bin/payload-dumper-go" -l lunaris-official.zip | tee report/partitions.txt
+          "$HOME/go/bin/payload-dumper-go" -p boot -o report lunaris-official.zip
+          file report/boot.img | tee report/boot-file.txt
+          sha256sum report/boot.img > report/boot-sha256.txt
+          {
+            echo 'Official LunarisOS annibale GMS 2026093005'
+            echo 'READ ONLY. DO NOT FLASH. Kernel/partition audit only.'
+            echo 'OTA SHA256 4e7f5530ec22b0f461d045f269df58d810cbec333481d80efc3619852b94789c'
+            echo "boot.img size $(stat -c %s report/boot.img)"
+            strings -a report/boot.img | grep -m 3 'Linux version 6.6' || true
+            echo 'If compressed inside Android boot, unpack separately for kernel version.'
+          } | tee report/BOOT_AUDIT.txt
+      - name: Publish reference-only boot image and metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: lunaris-annibale-20260930-boot-READONLY
+          path: report/
+          if-no-files-found: error
+          retention-days: 7
