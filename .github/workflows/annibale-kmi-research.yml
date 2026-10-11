@@ -1,0 +1,41 @@
+name: Annibale KMI 8 versus KMI 9 source audit
+on:
+  push:
+    branches: [evox-annibale-6.6.144-ksun-susfs]
+    paths: [.github/workflows/annibale-kmi-research.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  official-kmi-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Compare official Google GKI and Qualcomm Xiaomi KMI source
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'GOOGLE_ANDROID15_6_6_KMI_AUDIT\n'
+          for BRANCH in android15-6.6 android15-6.6-2026-01 android15-6.6-2026-07 android15-6.6-2026-10; do
+            echo "::group::Google ACK branch $BRANCH"
+            URL="https://android.googlesource.com/kernel/common/+/refs/heads/$BRANCH/build.config.common?format=TEXT"
+            if curl --retry 2 --connect-timeout 10 --max-time 30 -fsSL "$URL" -o /tmp/ack-config.b64; then
+              if base64 -d /tmp/ack-config.b64 > /tmp/ack-config 2>/dev/null; then
+                grep -E '^(BRANCH|KMI_GENERATION)=' /tmp/ack-config || true
+              else
+                echo 'Google response was not valid Gitiles base64'
+              fi
+            else
+              echo 'Branch not reachable; do not infer version'
+            fi
+            echo "::endgroup::"
+          done
+          echo 'Xiaomi annibale-w-oss: KMI_GENERATION=8 (verified in upstream build.config.common)'
+          echo 'LineageOS Qualcomm sm8750 lineage-22.2: KMI_GENERATION=8 (verified)'
+          echo 'Existing EvoX A17 binary and OEM .ko modules: KMI generation 8 (verified)'
+          echo 'Screenshot Lunaris: KMI generation 9 (kernel-source and vendor-module ABI not yet checked)'
+      - name: Report next decision
+        shell: bash
+        run: |
+          echo 'Kernel KMI migration requires vendor module ABI CRC checks or synchronous module rebuilds.'
+          echo 'No kernel images are modified, generated, flashed, or relabeled by this workflow.'
