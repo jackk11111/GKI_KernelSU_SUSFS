@@ -46,6 +46,38 @@ runs:
         fi
 
         cd "${{ github.workspace }}/susfs4ksu"
+
+        # EVOX annibale gate: upstream's newest android15-6.6 patch currently
+        # contains literal Git conflict markers, so 'patch' fails before
+        # kernel compilation. Select the newest CLEAN revision in the same
+        # official branch; never remove conflict sections blindly.
+        if [ "$SUSFS_BRANCH" = "gki-android15-6.6" ]; then
+          REL="kernel_patches/50_add_susfs_in_gki-android15-6.6.patch"
+          test -f "$REL" || { echo "SUSFS patch not found: $REL" >&2; exit 1; }
+          if grep -Eq '^(<<<<<<< |=======|>>>>>>> )' "$REL"; then
+            echo "Upstream SUSFS HEAD contains unresolved merge markers." >&2
+            CLEAN=""
+            for CANDIDATE in $(git rev-list --first-parent --max-count=128 HEAD); do
+              if git show "$CANDIDATE:$REL" > /tmp/evox-susfs-candidate.patch 2>/dev/null &&
+                 grep -q '^diff --git ' /tmp/evox-susfs-candidate.patch &&
+                 ! grep -Eq '^(<<<<<<< |=======|>>>>>>> )' /tmp/evox-susfs-candidate.patch; then
+                CLEAN="$CANDIDATE"
+                break
+              fi
+            done
+            if [ -z "$CLEAN" ]; then
+              echo "No clean SUSFS revision found among 128 ancestors; stop." >&2
+              exit 1
+            fi
+            echo "Selecting newest conflict-free official SUSFS revision: $CLEAN"
+            git checkout --detach "$CLEAN"
+          fi
+          ! grep -Eq '^(<<<<<<< |=======|>>>>>>> )' "$REL" || {
+            echo "SUSFS patch is still malformed; stop." >&2
+            exit 1
+          }
+        fi
+
         SUSFS_COMMIT="$(git rev-parse HEAD)"
         echo "SUSFS_COMMIT=$SUSFS_COMMIT" >> "$GITHUB_ENV"
         echo "Using SUSFS commit: $SUSFS_COMMIT"
@@ -54,7 +86,7 @@ runs:
         # no-features core build + Toolkit coexistence fixes) only apply to
         # KernelSU-Next (dev-susfs fork). Other flavors use the simonpunk
         # checkout as-is.
-        if [ "${{ inputs.root_flavor }}" = "next" ]; then
+        if [ "${{ inputs.root_flavor }}" = "next" ] && [ "$SUSFS_BRANCH" = "gki-android14-6.1" ]; then
           git fetch https://gitlab.com/pershoot/susfs4ksu.git gki-android14-6.1-dev || true
           git log ..FETCH_HEAD --oneline -n 2 | awk '{print $1}' | tac | xargs git cherry-pick 2>/dev/null || true
         fi
