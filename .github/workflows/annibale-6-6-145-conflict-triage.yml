@@ -1,0 +1,68 @@
+name: annibale | classify real Linux 6.6.145 Android GKI merge conflicts
+on:
+  push:
+    branches: [evox-annibale-6.6.158-lts-kmi8]
+    paths: [.github/workflows/annibale-6-6-145-conflict-triage.yml]
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  classify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Prepare exact official GKI8 and Linux stable baselines
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p report/conflicts
+          git clone -q --depth=1 --filter=blob:none --single-branch -b android15-6.6-lts \
+            https://android.googlesource.com/kernel/common.git gki
+          grep -qx 'KMI_GENERATION=8' gki/build.config.common
+          test "$(sed -n 's/^SUBLEVEL = //p' gki/Makefile | head -n1)" = 144
+          git -C gki remote add linux-stable https://github.com/gregkh/linux.git
+          git -C gki -c protocol.version=2 fetch -q --depth=1 --filter=blob:none linux-stable \
+            refs/tags/v6.6.144:refs/tags/v6.6.144 \
+            refs/tags/v6.6.145:refs/tags/v6.6.145
+          git -C gki config merge.conflictstyle diff3
+          git -C gki diff --binary --full-index v6.6.144 v6.6.145 > /tmp/patch-145.patch
+      - name: Perform read-only-on-remote three-way merge and package precise conflict hunks
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C gki apply --3way /tmp/patch-145.patch > report/merge.log 2>&1 || true
+          git -C gki ls-files -u | awk '{print $4}' | sort -u > report/unmerged.txt
+          echo "CONFLICT_COUNT=$(wc -l < report/unmerged.txt)" | tee report/status.txt
+          echo "TOTAL_CONFLICT_MARKER_FILES=$(grep -Rl '^<<<<<<< ' gki/arch/arm64 gki/drivers gki/fs gki/kernel gki/mm gki/net 2>/dev/null | wc -l)" | tee -a report/status.txt
+          while IFS= read -r path; do
+            test -f "gki/$path" || continue
+            fname="$(echo "$path" | tr '/' '_')"
+            awk '
+              /^<<<<<<< / {capt=1; count=0}
+              capt {print; count++}
+              /^>>>>>>> / {capt=0;print "----END OF HUNK----"}
+              count > 220 {print "... TRUNCATED LONG CONFLICT HUNK ...";capt=0}
+            ' "gki/$path" > "report/conflicts/${fname}.txt"
+            echo "$path  hunks=$(grep -c '^<<<<<<< ' "gki/$path" || true)" >> report/conflict-counts.txt
+          done < report/unmerged.txt
+          head -n 80 report/conflict-counts.txt | tee -a report/status.txt
+          {
+            echo '# Manual engineering required before releasing any 6.6.145+'
+            echo '3-way source integration has conflicts. This workflow does NOT auto-resolve, compile, or flash.'
+            echo 'Inspect conflict hunks; do not blindly choose ours/theirs.'
+            echo 'Android GKI patches and OEM ABI must be preserved. Linux Makefile number alone proves nothing.'
+          } > report/README.txt
+      - name: Publish conflict triage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: annibale-kmi8-linux-6.6.145-31-conflicts-detail
+          path: report/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          echo '## Android GKI 6.6.145 real conflict triage' >> "$GITHUB_STEP_SUMMARY"
+          if [ -f report/status.txt ]; then cat report/status.txt >> "$GITHUB_STEP_SUMMARY"; fi
+          echo 'No KMI migration, no kernel build, no flash approved.' >> "$GITHUB_STEP_SUMMARY"
