@@ -1,0 +1,166 @@
+diff --git a/drivers/base/power/main.c b/drivers/base/power/main.c
+--- a/drivers/base/power/main.c
++++ b/drivers/base/power/main.c
+@@ -103,9 +103,9 @@
+ 	dev->power.is_suspended = false;
+ 	dev->power.is_noirq_suspended = false;
+ 	dev->power.is_late_suspended = false;
+ 	init_completion(&dev->power.completion);
+-	complete_all(&dev->power.completion);
++	complete(&dev->power.completion);
+ 	dev->power.wakeup = NULL;
+ 	INIT_LIST_HEAD(&dev->power.entry);
+ }
+ 
+@@ -238,8 +238,12 @@
+  */
+ static void dpm_wait(struct device *dev, bool async)
+ {
+ 	if (!dev)
++		return;
++
++	/* Devices with no PM support do not use this completion. */
++	if (dev->power.no_pm)
+ 		return;
+ 
+ 	if (async || (pm_async_enabled && dev->power.async_suspend)) {
+ 		trace_android_vh_dpm_wait_start(dev);
+diff --git a/drivers/clk/clk-scmi.c b/drivers/clk/clk-scmi.c
+--- a/drivers/clk/clk-scmi.c
++++ b/drivers/clk/clk-scmi.c
+@@ -8,11 +8,11 @@
+ #include <linux/clk-provider.h>
+ #include <linux/device.h>
+ #include <linux/err.h>
+ #include <linux/of.h>
++#include <linux/math64.h>
+ #include <linux/module.h>
+ #include <linux/scmi_protocol.h>
+-#include <asm/div64.h>
+ 
+ #define NOT_ATOMIC	false
+ #define ATOMIC		true
+ 
+@@ -65,9 +65,9 @@
+ 		return fmax;
+ 
+ 	ftmp = rate - fmin;
+ 	ftmp += clk->info->range.step_size - 1; /* to round up */
+-	do_div(ftmp, clk->info->range.step_size);
++	ftmp = div64_ul(ftmp, clk->info->range.step_size);
+ 
+ 	return ftmp * clk->info->range.step_size + fmin;
+ }
+ 
+diff --git a/drivers/usb/typec/tcpm/tcpm.c b/drivers/usb/typec/tcpm/tcpm.c
+--- a/drivers/usb/typec/tcpm/tcpm.c
++++ b/drivers/usb/typec/tcpm/tcpm.c
+@@ -2358,9 +2358,9 @@
+ 	svdm_version = typec_get_negotiated_svdm_version(port->typec_port);
+ 	if (svdm_version < 0)
+ 		return svdm_version;
+ 
+-	header = VDO(altmode->svid, vdo ? 2 : 1, svdm_version, CMD_ENTER_MODE);
++	header = VDO(altmode->svid, 1, svdm_version, CMD_ENTER_MODE);
+ 	header |= VDO_OPOS(altmode->mode);
+ 
+ 	return tcpm_queue_vdm_unlocked(port, header, vdo, vdo ? 1 : 0);
+ }
+diff --git a/fs/f2fs/inode.c b/fs/f2fs/inode.c
+--- a/fs/f2fs/inode.c
++++ b/fs/f2fs/inode.c
+@@ -317,11 +317,11 @@
+ 		}
+ 	}
+ 
+ 	if (f2fs_sb_has_flexible_inline_xattr(sbi) &&
+-		f2fs_has_inline_xattr(inode) &&
+-		(fi->i_inline_xattr_size < MIN_INLINE_XATTR_SIZE ||
+-		fi->i_inline_xattr_size > MAX_INLINE_XATTR_SIZE)) {
++		(fi->i_inline_xattr_size > MAX_INLINE_XATTR_SIZE ||
++		(f2fs_has_inline_xattr(inode) &&
++		 fi->i_inline_xattr_size < MIN_INLINE_XATTR_SIZE))) {
+ 		f2fs_warn(sbi, "%s: inode (ino=%lx) has corrupted i_inline_xattr_size: %d, min: %zu, max: %lu",
+ 			  __func__, inode->i_ino, fi->i_inline_xattr_size,
+ 			  MIN_INLINE_XATTR_SIZE, MAX_INLINE_XATTR_SIZE);
+ 		return false;
+diff --git a/include/linux/fwnode.h b/include/linux/fwnode.h
+--- a/include/linux/fwnode.h
++++ b/include/linux/fwnode.h
+@@ -198,10 +198,12 @@
+ 			       const struct fwnode_operations *ops)
+ {
+ 	fwnode->secondary = NULL;
+ 	fwnode->ops = ops;
++	fwnode->dev = NULL;
+ 	INIT_LIST_HEAD(&fwnode->consumers);
+ 	INIT_LIST_HEAD(&fwnode->suppliers);
++	fwnode->flags = 0;
+ }
+ 
+ static inline void fwnode_dev_initialized(struct fwnode_handle *fwnode,
+ 					  bool initialized)
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -10367,9 +10367,9 @@
+ 	/* Assume that task can't fit any CPU of the group */
+ 	if (sd->flags & SD_ASYM_CPUCAPACITY)
+ 		sgs->group_misfit_task_load = 1;
+ 
+-	for_each_cpu(i, sched_group_span(group)) {
++	for_each_cpu_and(i, sched_group_span(group), p->cpus_ptr) {
+ 		struct rq *rq = cpu_rq(i);
+ 		misfit_reason_t reason;
+ 		unsigned int local;
+ 
+diff --git a/mm/vmscan.c b/mm/vmscan.c
+--- a/mm/vmscan.c
++++ b/mm/vmscan.c
+@@ -2233,12 +2233,14 @@
+ 		 * Is there need to periodically free_folio_list? It would
+ 		 * appear not as the counts should be low
+ 		 */
+ 		trace_android_vh_folio_trylock_clear(folio);
+-		if (unlikely(folio_test_large(folio)))
++		if (unlikely(folio_test_large(folio))) {
++			try_to_unmap_flush();
+ 			destroy_large_folio(folio);
+-		else
++		} else {
+ 			list_add(&folio->lru, &free_folios);
++		}
+ 		continue;
+ 
+ activate_locked_split:
+ 		/*
+diff --git a/net/xfrm/xfrm_state.c b/net/xfrm/xfrm_state.c
+--- a/net/xfrm/xfrm_state.c
++++ b/net/xfrm/xfrm_state.c
+@@ -2657,9 +2657,10 @@
+ 		return PTR_ERR(data);
+ 
+ 	/* Use the 64-bit / untranslated format on Android, even for compat */
+ 	if (!IS_ENABLED(CONFIG_GKI_NET_XFRM_HACKS) || IS_ENABLED(CONFIG_XFRM_USER_COMPAT)) {
+-		if (in_compat_syscall()) {
++		if (IS_ENABLED(CONFIG_COMPAT_FOR_U64_ALIGNMENT) &&
++		    in_compat_syscall()) {
+ 			struct xfrm_translator *xtr = xfrm_get_translator();
+ 
+ 			if (!xtr) {
+ 				kfree(data);
+diff --git a/net/xfrm/xfrm_user.c b/net/xfrm/xfrm_user.c
+--- a/net/xfrm/xfrm_user.c
++++ b/net/xfrm/xfrm_user.c
+@@ -3123,9 +3123,10 @@
+ 		return -EPERM;
+ 
+ 	/* Use the 64-bit / untranslated format on Android, even for compat */
+ 	if (!IS_ENABLED(CONFIG_GKI_NET_XFRM_HACKS) || IS_ENABLED(CONFIG_XFRM_USER_COMPAT)) {
+-		if (in_compat_syscall()) {
++		if (IS_ENABLED(CONFIG_COMPAT_FOR_U64_ALIGNMENT) &&
++		    in_compat_syscall()) {
+ 			struct xfrm_translator *xtr = xfrm_get_translator();
+ 
+ 			if (!xtr)
+ 				return -EOPNOTSUPP;
