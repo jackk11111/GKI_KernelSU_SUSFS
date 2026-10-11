@@ -229,7 +229,7 @@ diff --git a/fs/exfat/namei.c b/fs/exfat/namei.c
  	return ret;
  }
  
-@@ -1062,13 +1119,13 @@
+@@ -1062,9 +1119,9 @@
  static int exfat_move_file(struct inode *inode, struct exfat_chain *p_olddir,
  		int oldentry, struct exfat_chain *p_newdir,
  		struct exfat_uni_name *p_uniname, struct exfat_inode_info *ei)
@@ -241,7 +241,7 @@ diff --git a/fs/exfat/namei.c b/fs/exfat/namei.c
  	struct super_block *sb = inode->i_sb;
  	struct exfat_entry_set_cache mov_es, new_es;
  
-@@ -1077,8 +1134,22 @@
+@@ -1077,9 +1134,20 @@
  			ES_ALL_ENTRIES);
  	if (ret)
  		return -EIO;
@@ -264,7 +264,7 @@ diff --git a/fs/exfat/namei.c b/fs/exfat/namei.c
  	if (newentry < 0) {
  		ret = newentry; /* -EIO or -ENOSPC */
  		goto put_mov_es;
-@@ -1097,27 +1168,32 @@
+@@ -1097,22 +1168,27 @@
  	epnew = exfat_get_dentry_cached(&new_es, ES_IDX_STREAM);
  	*epnew = *epmov;
  
