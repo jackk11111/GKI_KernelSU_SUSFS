@@ -1,0 +1,81 @@
+name: annibale | Android GKI 6.6.158 genuine three-way integration
+on:
+  push:
+    branches: [evox-annibale-6.6.158-lts-kmi8]
+    paths: [.github/workflows/annibale-6-6-158-three-way-port.yml]
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  three-way-integrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Fetch Google GKI 6.6 KMI8 and Linux stable tags into shared Git object store
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p report
+          git clone -q --depth 1 --filter=blob:none --single-branch -b android15-6.6-lts \
+            https://android.googlesource.com/kernel/common.git gki
+          test "$(sed -n 's/^SUBLEVEL = //p' gki/Makefile | head -n1)" = 144
+          grep -qx 'KMI_GENERATION=8' gki/build.config.common
+          git -C gki config user.email "annibale-audit@users.noreply.github.com"
+          git -C gki config user.name "Annibale forensic build"
+          echo "Original_GKI_SHA=$(git -C gki rev-parse HEAD)" | tee report/source-summary.txt
+          git -C gki remote add upstream-stable https://github.com/gregkh/linux.git
+          REFS=()
+          for n in $(seq 144 158); do
+            REFS+=("refs/tags/v6.6.${n}:refs/tags/v6.6.${n}")
+          done
+          git -C gki -c protocol.version=2 fetch -q --depth=1 --filter=blob:none upstream-stable "${REFS[@]}"
+          git -C gki rev-parse 'v6.6.144^{commit}' 'v6.6.158^{commit}' | tee -a report/source-summary.txt
+      - name: Three-way apply single stable patchlevels with merge-base blobs available
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo '# Linux stable 6.6.144 through 6.6.158, Android GKI KMI 8'
+            echo 'This is an isolated source merge feasibility test only.'
+          } | tee report/three-way-result.txt
+          for n in $(seq 145 158); do
+            prev=$((n-1))
+            echo "=== 6.6.${prev} -> 6.6.${n} ===" | tee -a report/three-way-result.txt
+            git -C gki diff --binary --full-index \
+              "v6.6.${prev}" "v6.6.${n}" > /tmp/one.patch
+            if git -C gki apply --3way --whitespace=nowarn /tmp/one.patch > /tmp/apply.log 2>&1; then
+              echo "THREE_WAY_APPLIED=6.6.${n}" | tee -a report/three-way-result.txt
+              grep '^KMI_GENERATION=8$' gki/build.config.common
+              test "$(sed -n 's/^SUBLEVEL = //p' gki/Makefile | head -n1)" = "$n"
+              git -C gki add -A
+              git -C gki commit -qm "GKI audit: Linux stable backport 6.6.${n}"
+            else
+              echo "FIRST_THREE_WAY_CONFLICT=6.6.${prev}_to_6.6.${n}" | tee -a report/three-way-result.txt
+              cat /tmp/apply.log > report/apply.log
+              git -C gki diff --name-only --diff-filter=U > report/unmerged-paths.txt
+              git -C gki ls-files -u | awk '{print $4}' | sort -u > report/unmerged-index-paths.txt
+              echo "UNMERGED_FILE_COUNT=$(wc -l < report/unmerged-index-paths.txt)" | tee -a report/three-way-result.txt
+              echo "LOG_SAMPLE:" | tee -a report/three-way-result.txt
+              head -n 70 /tmp/apply.log | tee -a report/three-way-result.txt
+              echo "FILES_SAMPLE:" | tee -a report/three-way-result.txt
+              head -n 80 report/unmerged-index-paths.txt | tee -a report/three-way-result.txt
+              echo 'NO_BUILD / NO_FLASH / NO_ABI_APPROVAL' | tee -a report/three-way-result.txt
+              exit 0
+            fi
+          done
+          echo 'ALL_14_RELEASES_INTEGRATED_IN_TEST_SOURCE=true' | tee -a report/three-way-result.txt
+          echo 'WARNING: a successful patch merge would still need a kernel build, ABI test, boot test.' | tee -a report/three-way-result.txt
+      - name: Archive source merge audit reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: annibale-linux-6.6.158-android15-kmi8-three-way-report
+          path: report/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          echo '## KMI8 three-way source merge feasibility' >> "$GITHUB_STEP_SUMMARY"
+          if test -f report/three-way-result.txt; then cat report/three-way-result.txt >> "$GITHUB_STEP_SUMMARY"; fi
+          echo 'Success of the workflow does NOT imply all stable patches applied or any kernel bootability.' >> "$GITHUB_STEP_SUMMARY"
