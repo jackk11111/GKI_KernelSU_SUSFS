@@ -1,5 +1,6 @@
 name: EvoX A17 annibale | experimental GKI 6.6 LTS KMI8 KSU-Next SUSFS
 
+# SUSFS gate r2: select newest official conflict-free source revision.
 # One narrowly scoped build. Do not flash until kernel ABI and OTA boot image
 # have been verified against the exact annibale Evolution X A17 build.
 on:
