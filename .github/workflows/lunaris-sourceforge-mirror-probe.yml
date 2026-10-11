@@ -1,0 +1,26 @@
+name: Lunaris SourceForge mirror routing probe (metadata only)
+on:
+  push:
+    branches: [evox-annibale-6.6.144-ksun-susfs]
+    paths: [.github/workflows/lunaris-sourceforge-mirror-probe.yml]
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Test independent download mirrors without downloading ROM
+        shell: bash
+        run: |
+          set -u
+          PATH_OTA='/project/ghosuto/annibale/Lunaris-AOSP-annibale-OFFICIAL-3.12-GMS-2026093005.zip'
+          for mirror in netix excellmedia phoenixnap pilotfiber cfhcable versaweb jaist ufpr master; do
+            url="https://${mirror}.dl.sourceforge.net${PATH_OTA}"
+            echo "::group::Mirror ${mirror}"
+            curl -sSIL --max-redirs 3 --connect-timeout 6 --max-time 18 \
+              -A 'Mozilla/5.0' "$url" 2>&1 | \
+              grep -Ei '(^HTTP/|content-length:|content-range:|location:|curl:)' | tail -12 || true
+            echo "::endgroup::"
+          done
+          echo 'Only HEAD requests issued. No OTA contents were downloaded.'
