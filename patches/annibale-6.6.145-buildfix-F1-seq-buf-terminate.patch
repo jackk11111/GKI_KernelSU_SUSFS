@@ -1,0 +1,15 @@
+diff --git a/kernel/trace/trace_events_hist.c b/kernel/trace/trace_events_hist.c
+--- a/kernel/trace/trace_events_hist.c
++++ b/kernel/trace/trace_events_hist.c
+@@ -2956,4 +2956,4 @@
+ 	/* Terminate synthetic_name with a NUL. */
+-	seq_buf_str(&s);
++	seq_buf_terminate(&s);
+ 
+ 	if (seq_buf_has_overflowed(&s)) {
+@@ -3074,4 +3074,4 @@
+ 	/* Terminate cmd with a NUL. */
+-	seq_buf_str(&s);
++	seq_buf_terminate(&s);
+ 
+ 	if (seq_buf_has_overflowed(&s)) {
