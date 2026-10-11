@@ -26,7 +26,10 @@ runs:
             manager="KernelSU Manager"
             ;;
           next)
-            repo="https://github.com/KernelSU-Next/KernelSU-Next.git"
+            # EVOX annibale: the dev-susfs fork descends from official v3.4.0.
+            # This kernel source includes the SUSFS-aware KernelSU-Next hooks;
+            # the official manager is installed separately after ROM boot.
+            repo="https://github.com/pershoot/KernelSU-Next.git"
             directory="KernelSU-Next"
             manager="KernelSU Next Manager"
             ;;
