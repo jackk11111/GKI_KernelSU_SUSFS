@@ -691,6 +691,31 @@ jobs:
           fi
         } > "$SUMMARY_FILE"
 
+    - name: Restrict annibale AnyKernel3 installer to matching device
+      if: inputs.brand_name == 'annibale'
+      shell: bash
+      run: |
+        set -euo pipefail
+        AK3="${{ github.workspace }}/AnyKernel3/anykernel.sh"
+        test -f "$AK3" || { echo "Missing anykernel.sh. Refusing to publish annibale ZIP." >&2; exit 1; }
+        grep -qx 'do.devicecheck=0' "$AK3" || {
+          echo 'Unexpected AnyKernel3 devicecheck format; refusing to publish.' >&2
+          exit 1
+        }
+        grep -qx 'device.name1=' "$AK3" || {
+          echo 'Unexpected AnyKernel3 device.name1; refusing to publish.' >&2
+          exit 1
+        }
+        sed -i 's/^do.devicecheck=0$/do.devicecheck=1/' "$AK3"
+        sed -i 's/^device.name1=$/device.name1=annibale/' "$AK3"
+        grep -qx 'do.devicecheck=1' "$AK3"
+        grep -qx 'device.name1=annibale' "$AK3"
+        grep -qx 'block=boot' "$AK3"
+        grep -qx 'is_slot_device=auto' "$AK3"
+        test -s "${{ github.workspace }}/AnyKernel3/Image"
+        echo 'AnyKernel3 restricted to annibale; boot partition A/B handling checked.'
+        echo 'NOTE: device guard does NOT establish ABI or boot compatibility.'
+
     - name: Upload Artifacts
       id: kernel-artifact
       uses: actions/upload-artifact@v7
