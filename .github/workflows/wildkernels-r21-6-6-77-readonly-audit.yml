@@ -1,0 +1,64 @@
+name: WildKernels r21 6.6.77 exact ZIP forensic audit
+on:
+  push:
+    branches: [evox-annibale-6.6.144-ksun-susfs]
+    paths: [.github/workflows/wildkernels-r21-6-6-77-readonly-audit.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Download pinned upstream release and validate SHA256
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p report
+          ZIP=/tmp/wildkernels-r21-6.6.77-next.zip
+          URL='https://github.com/WildKernels/GKI_KernelSU_SUSFS/releases/download/r21/6.6.77-android15-2025-03-KernelSU-Next-AnyKernel3.zip'
+          SHA='fd02b62bd3c4860a73366db37dc17ae16e589a01084dcd2f719d59583b3c5758'
+          curl --fail --location --retry 2 --retry-all-errors --connect-timeout 15 --max-time 240 "$URL" --output "$ZIP"
+          echo "$SHA  $ZIP" | sha256sum --check
+          unzip -t "$ZIP" | tail -4
+          unzip -Z1 "$ZIP" | tee report/listing.txt
+          echo "$SHA  $(basename "$ZIP")" > report/original-release-sha256.txt
+      - name: Inspect binary kernel identity and AnyKernel3 installer WITHOUT execution
+        shell: bash
+        run: |
+          set -euo pipefail
+          ZIP=/tmp/wildkernels-r21-6.6.77-next.zip
+          IMAGE="$(unzip -Z1 "$ZIP" | grep -E '(^|/)Image$|(^|/)Image\.gz$' | head -n1 || true)"
+          if [ -z "$IMAGE" ]; then
+            echo "Neither Image nor Image.gz found" | tee report/audit.txt
+            exit 1
+          fi
+          unzip -p "$ZIP" "$IMAGE" > /tmp/gki-image
+          echo "GKI kernel entry: $IMAGE" | tee report/audit.txt
+          file /tmp/gki-image | tee -a report/audit.txt
+          if [[ "$IMAGE" == *.gz ]]; then
+            gzip -dc /tmp/gki-image > /tmp/gki-uncompressed
+            IMAGE_PATH=/tmp/gki-uncompressed
+          else
+            IMAGE_PATH=/tmp/gki-image
+          fi
+          echo "Kernel SHA256: $(sha256sum "$IMAGE_PATH")" | tee -a report/audit.txt
+          echo '=== Embedded Linux version banner ===' | tee -a report/audit.txt
+          strings -a "$IMAGE_PATH" | grep '^Linux version ' | head -8 | tee -a report/audit.txt || true
+          echo '=== Embedded KMI-looking strings (up to 20) ===' | tee -a report/audit.txt
+          strings -a "$IMAGE_PATH" | grep -E '6\.6\.77-android15(-8|-9|-Wild)' | head -20 | tee -a report/audit.txt || true
+          echo '=== Installer metadata ===' | tee -a report/audit.txt
+          if unzip -Z1 "$ZIP" | grep -q '^anykernel.sh$'; then
+            unzip -p "$ZIP" anykernel.sh > report/anykernel.sh.txt
+            grep -nE '^(properties|do\.devicecheck|device\.name|block=|is_slot_device=|ramdisk_compression=|#)' report/anykernel.sh.txt | head -65 | tee -a report/audit.txt || true
+          else
+            echo "No root-level anykernel.sh" | tee -a report/audit.txt
+          fi
+          echo 'READ ONLY; NOTHING WAS FLASHED OR EXECUTED FROM RELEASE ZIP' | tee -a report/audit.txt
+      - name: Upload tiny audit report (no kernel binary)
+        uses: actions/upload-artifact@v4
+        with:
+          name: wildkernels-r21-6.6.77-kmi-identity-audit
+          path: report/
+          retention-days: 14
