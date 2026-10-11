@@ -1,0 +1,38 @@
+name: EvoX A17 annibale | experimental GKI 6.6 LTS KMI8 KSU-Next SUSFS
+
+# One narrowly scoped build. Do not flash until kernel ABI and OTA boot image
+# have been verified against the exact annibale Evolution X A17 build.
+on:
+  push:
+    branches:
+      - evox-annibale-6.6.144-ksun-susfs
+    paths:
+      - .github/workflows/evox-annibale-kernel.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  annibale-experimental-gki:
+    # Single 4K build from the latest android15-6.6 LTS source, NOT a ROM build.
+    # KMI -8 must remain intact; do not bypass module version checking.
+    uses: ./.github/workflows/prepare.yml
+    with:
+      config_file: .github/config/android15-6.6.json
+      os_patch_level: lts
+      variant: KernelSU-Next
+      page_size: 4k
+      feature_set: SUSFS
+      root_flavor: next
+      # pershoot dev-susfs is a descendant of the official KernelSU-Next
+      # v3.4.0 tag (1a879d6a...) and has SUSFS-aware kernel hooks.
+      root_commit: 956ea0f526fd4e216f8d67844cb61b34a4c49bfe
+      # Empty means latest gki-android15-6.6 SUSFS branch at build time.
+      susfs_commit: ""
+      brand_name: annibale
+      keep_kmi: true
+      allow_version_mismatch: false
+      use_cache: false
+    secrets: inherit
