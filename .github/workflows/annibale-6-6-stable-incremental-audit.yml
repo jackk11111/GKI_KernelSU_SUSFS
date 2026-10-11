@@ -1,0 +1,72 @@
+name: annibale | incremental Linux 6.6.145-158 KMI8 port audit
+on:
+  push:
+    branches: [evox-annibale-6.6.158-lts-kmi8]
+    paths: [.github/workflows/annibale-6-6-stable-incremental-audit.yml]
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  incremental-lts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Fetch Android GKI and Linux stable release tags
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p report
+          git clone -q --depth 1 --filter=blob:none --single-branch \
+            -b android15-6.6-lts https://android.googlesource.com/kernel/common.git gki
+          grep '^KMI_GENERATION=8$' gki/build.config.common
+          test "$(sed -n 's/^SUBLEVEL = //p' gki/Makefile | head -n1)" = '144'
+          git -C gki rev-parse HEAD > report/android-source-sha.txt
+          mkdir stable
+          git -C stable init -q
+          git -C stable remote add origin https://github.com/gregkh/linux.git
+          REFS=()
+          for n in $(seq 144 158); do
+            REFS+=("refs/tags/v6.6.${n}:refs/tags/v6.6.${n}")
+          done
+          git -C stable -c protocol.version=2 fetch -q --depth=1 --filter=blob:none origin "${REFS[@]}"
+      - name: Backport one upstream stable patchlevel at a time (isolated workspace only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'Android GKI 6.6.144 KMI8 -> upstream Linux 6.6.158 incremental feasibility\n' | tee report/incremental-status.txt
+          for n in $(seq 145 158); do
+            prev=$((n-1))
+            echo "=== Try 6.6.${prev} -> 6.6.${n} ===" | tee -a report/incremental-status.txt
+            git -C stable diff --binary "v6.6.${prev}" "v6.6.${n}" > /tmp/one-stable-release.patch
+            git -C stable diff --shortstat "v6.6.${prev}" "v6.6.${n}" | tee -a report/incremental-status.txt
+            if git -C gki apply --check /tmp/one-stable-release.patch > /tmp/patch-result.txt 2>&1; then
+              git -C gki apply /tmp/one-stable-release.patch
+              sublevel="$(sed -n 's/^SUBLEVEL = //p' gki/Makefile | head -n1)"
+              kmi="$(sed -n 's/^KMI_GENERATION=//p' gki/build.config.common | head -n1)"
+              if [ "$sublevel" != "$n" ] || [ "$kmi" != '8' ]; then
+                echo "STOP: source metadata sublevel=$sublevel KMI=$kmi" | tee -a report/incremental-status.txt
+                exit 0
+              fi
+              echo "PATCH_APPLIED_CLEANLY=6.6.$n" | tee -a report/incremental-status.txt
+            else
+              echo "FIRST_CONFLICT=6.6.${prev}_to_6.6.${n}" | tee -a report/incremental-status.txt
+              head -n 70 /tmp/patch-result.txt | tee -a report/incremental-status.txt
+              echo 'Stopped safely. No kernel image compiled, no ROM or boot modified.' | tee -a report/incremental-status.txt
+              exit 0
+            fi
+          done
+          echo 'FULL_SERIES_APPLIED_CLEANLY=true' | tee -a report/incremental-status.txt
+      - name: Publish incremental source audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: annibale-linux-6.6.158-incremental-KMI8-audit
+          path: report/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Summarize
+        if: always()
+        shell: bash
+        run: |
+          echo '## Incremental 6.6.158 / Android GKI KMI8 port gate' >> "$GITHUB_STEP_SUMMARY"
+          if [ -f report/incremental-status.txt ]; then cat report/incremental-status.txt >> "$GITHUB_STEP_SUMMARY"; fi
+          echo 'This is only a source-merge check, not a successful kernel build, ABI validation, or flash approval.' >> "$GITHUB_STEP_SUMMARY"
