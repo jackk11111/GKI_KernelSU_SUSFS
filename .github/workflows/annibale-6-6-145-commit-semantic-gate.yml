@@ -16,15 +16,28 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p report
+          phase=clone_ack
+          trap 'rc=$?; echo "FAILED_PHASE=$phase RC=$rc" | tee -a report/phase.txt; exit "$rc"' ERR
+          echo "START_PHASE=$phase" | tee -a report/phase.txt
           git clone -q --depth=1 --filter=blob:none --single-branch -b android15-6.6-lts \
             https://android.googlesource.com/kernel/common.git ack
+          phase=validate_ack
+          echo "START_PHASE=$phase" | tee -a report/phase.txt
+          echo "ACK_SUBLEVEL=$(sed -n 's/^SUBLEVEL = //p' ack/Makefile | head -n1)"
+          grep '^KMI_GENERATION=' ack/build.config.common || true
           test "$(sed -n 's/^SUBLEVEL = //p' ack/Makefile | head -n1)" = 144
           grep -qx 'KMI_GENERATION=8' ack/build.config.common
+          phase=fetch_stable_tags
+          echo "START_PHASE=$phase" | tee -a report/phase.txt
           git -C ack remote add stable https://github.com/gregkh/linux.git
           git -C ack -c protocol.version=2 fetch -q --depth=400 --filter=blob:none stable \
             refs/tags/v6.6.144:refs/tags/v6.6.144 \
             refs/tags/v6.6.145:refs/tags/v6.6.145
+          phase=verify_tag_ancestry
+          echo "START_PHASE=$phase" | tee -a report/phase.txt
           git -C ack merge-base --is-ancestor 'v6.6.144^{commit}' 'v6.6.145^{commit}'
+          phase=enumerate_commits
+          echo "START_PHASE=$phase" | tee -a report/phase.txt
           git -C ack rev-list --reverse --no-merges v6.6.144..v6.6.145 > report/upstream-commit-list.txt
           echo "ACK_BASE=$(git -C ack rev-parse HEAD)" | tee report/baseline.txt
           echo "UPSTREAM_COMMITS=$(wc -l < report/upstream-commit-list.txt)" | tee -a report/baseline.txt
