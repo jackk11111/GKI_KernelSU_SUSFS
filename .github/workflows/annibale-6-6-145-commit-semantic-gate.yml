@@ -1,0 +1,85 @@
+name: annibale | classify stable 6.6.145 commits against Android GKI8
+on:
+  push:
+    branches: [evox-annibale-6.6.158-lts-kmi8]
+    paths: [.github/workflows/annibale-6-6-145-commit-semantic-gate.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  classify-stable-commits:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Fetch exact ACK KMI8 and upstream stable patchlevel
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p report
+          git clone -q --depth=1 --filter=blob:none --single-branch -b android15-6.6-lts \
+            https://android.googlesource.com/kernel/common.git ack
+          test "$(sed -n 's/^SUBLEVEL = //p' ack/Makefile | head -n1)" = 144
+          grep -qx 'KMI_GENERATION=8' ack/build.config.common
+          git -C ack remote add stable https://github.com/gregkh/linux.git
+          git -C ack -c protocol.version=2 fetch -q --depth=400 --filter=blob:none stable \
+            refs/tags/v6.6.144:refs/tags/v6.6.144 \
+            refs/tags/v6.6.145:refs/tags/v6.6.145
+          git -C ack merge-base --is-ancestor 'v6.6.144^{commit}' 'v6.6.145^{commit}'
+          git -C ack rev-list --reverse --no-merges v6.6.144..v6.6.145 > report/upstream-commit-list.txt
+          echo "ACK_BASE=$(git -C ack rev-parse HEAD)" | tee report/baseline.txt
+          echo "UPSTREAM_COMMITS=$(wc -l < report/upstream-commit-list.txt)" | tee -a report/baseline.txt
+      - name: Evaluate each upstream commit independently on unchanged ACK
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'commit\tclassification\tsubject\tpaths\n' > report/commit-status.tsv
+          : > report/conflict-candidates.tsv
+          : > report/redundant-candidates.tsv
+          : > report/clean-candidates.tsv
+          : > report/reasons.txt
+          ack_head="$(git -C ack rev-parse HEAD)"
+          while IFS= read -r sha; do
+            test -n "$sha" || continue
+            git -C ack format-patch --no-signature --stdout -1 "$sha" > /tmp/annibale_stable_commit.patch
+            subject="$(git -C ack log -1 --format=%s "$sha" | tr '\t' ' ')"
+            paths="$(git -C ack diff-tree --no-commit-id --name-only -r "$sha" | paste -sd, -)"
+            if git -C ack apply --reverse --check /tmp/annibale_stable_commit.patch >/dev/null 2>&1; then
+              state=ALREADY_PRESENT_EQUIVALENT
+              printf '%s\t%s\t%s\n' "$sha" "$subject" "$paths" >> report/redundant-candidates.tsv
+            elif git -C ack apply --check /tmp/annibale_stable_commit.patch >/dev/null 2>&1; then
+              state=APPLIES_IN_ISOLATION
+              printf '%s\t%s\t%s\n' "$sha" "$subject" "$paths" >> report/clean-candidates.tsv
+            else
+              state=NEEDS_ANDROID_SPECIFIC_TRIAGE
+              printf '%s\t%s\t%s\n' "$sha" "$subject" "$paths" >> report/conflict-candidates.tsv
+            fi
+            printf '%s\t%s\t%s\t%s\n' "$sha" "$state" "$subject" "$paths" >> report/commit-status.tsv
+          done < report/upstream-commit-list.txt
+          test "$(git -C ack rev-parse HEAD)" = "$ack_head"
+          test -z "$(git -C ack status --porcelain)"
+          {
+            echo "This is an individual-commit applicability classifier, NOT a kernel integration."
+            echo "Reverse-applicable commits are only patch-equivalent candidates, not a full semantic proof."
+            echo "Individually applicable commits may have dependencies and cannot be blindly cherry-picked as a release."
+            echo "Conflicted commits require review of the Android-specific existing implementations."
+            echo "Source tree intentionally unchanged; no version bump, ABI bypass, binary, or flash artifact."
+          } > report/reasons.txt
+          {
+            echo "### Linux v6.6.145 commit-level classification on official Android GKI KMI8"
+            cat report/baseline.txt
+            echo "REVERSE_APPLICABLE=$(wc -l < report/redundant-candidates.tsv)"
+            echo "INDEPENDENTLY_APPLICABLE=$(wc -l < report/clean-candidates.tsv)"
+            echo "REQUIRES_TRIAGE=$(wc -l < report/conflict-candidates.tsv)"
+            echo "FIRST_30_TRIAGE:"
+            head -n 30 report/conflict-candidates.tsv
+            cat report/reasons.txt
+          } | tee report/summary.txt
+          cat report/summary.txt >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload audited commit-level classification
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: annibale-gki8-v6.6.145-commit-classification
+          path: report/
+          retention-days: 14
+          if-no-files-found: warn
