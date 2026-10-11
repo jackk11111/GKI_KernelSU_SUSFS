@@ -1,0 +1,82 @@
+name: annibale | Linux 6.6.158 LTS KMI8 upstream port gate
+on:
+  push:
+    branches: [evox-annibale-6.6.158-lts-kmi8]
+    paths: [.github/workflows/annibale-6-6-158-backport-audit.yml]
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  lts-backport-feasibility:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check GKI current version and source KMI
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p report
+          git clone --depth 1 --single-branch --filter=blob:none \
+            -b android15-6.6-lts \
+            https://android.googlesource.com/kernel/common.git gki
+          echo 'Google Android 15 / Linux 6.6 LTS source' | tee report/status.txt
+          git -C gki rev-parse HEAD | tee -a report/status.txt
+          grep -E '^(VERSION|PATCHLEVEL|SUBLEVEL) =' gki/Makefile | tee -a report/status.txt
+          grep -E '^(KMI_GENERATION|BRANCH)=' gki/build.config.common | tee -a report/status.txt
+          grep -q '^KMI_GENERATION=8$' gki/build.config.common || {
+            echo 'GATE FAIL: not official KMI 8' | tee -a report/status.txt
+            exit 1
+          }
+      - name: Fetch official stable tags without cloning full history
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir stable
+          git -C stable init -q
+          git -C stable remote add origin https://github.com/gregkh/linux.git
+          git -C stable -c protocol.version=2 fetch --quiet --depth=1 --filter=blob:none origin \
+            refs/tags/v6.6.144:refs/tags/v6.6.144 \
+            refs/tags/v6.6.158:refs/tags/v6.6.158
+          echo 'Linux upstream stable v6.6.144..v6.6.158 (official tags)' | tee report/stable-tags.txt
+          git -C stable rev-parse 'v6.6.144^{commit}' 'v6.6.158^{commit}' | tee -a report/stable-tags.txt
+          echo 'Changed upstream files:' | tee -a report/stable-tags.txt
+          git -C stable diff --shortstat v6.6.144 v6.6.158 | tee -a report/stable-tags.txt
+          git -C stable diff --binary v6.6.144 v6.6.158 > /tmp/linux-6.6.144-to-6.6.158.patch
+          du -h /tmp/linux-6.6.144-to-6.6.158.patch | tee -a report/stable-tags.txt
+      - name: Test exact upstream stable patch against Android GKI without changing source
+        shell: bash
+        run: |
+          set -euo pipefail
+          SUBLEVEL="$(sed -n 's/^SUBLEVEL = //p' gki/Makefile | head -n1)"
+          echo "GKI baseline 6.6.${SUBLEVEL}" | tee -a report/status.txt
+          if [ "$SUBLEVEL" = 158 ]; then
+            echo 'ALREADY_CURRENT: Android GKI source already at 6.6.158' | tee -a report/status.txt
+            exit 0
+          fi
+          if [ "$SUBLEVEL" != 144 ]; then
+            echo 'NEEDS_REBASE: GKI baseline not 6.6.144, do not apply an incorrect upstream diff' | tee -a report/status.txt
+            exit 0
+          fi
+          if git -C gki apply --check /tmp/linux-6.6.144-to-6.6.158.patch > report/apply-check.txt 2>&1; then
+            echo 'UPSTREAM_DIFF_APPLIES_CLEANLY=true' | tee -a report/status.txt
+          else
+            echo 'UPSTREAM_DIFF_APPLIES_CLEANLY=false' | tee -a report/status.txt
+            echo 'First conflicts:' | tee -a report/status.txt
+            head -n 50 report/apply-check.txt | tee -a report/status.txt
+            echo 'MUST_REBASE_PATCHES: no kernel was built or modified in this check.' | tee -a report/status.txt
+          fi
+      - name: Upload read-only port report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: annibale-linux-6.6.158-gki-kmi8-port-gate
+          path: report/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Display conclusion
+        if: always()
+        shell: bash
+        run: |
+          echo '### 6.6.158 port feasibility' >> "$GITHUB_STEP_SUMMARY"
+          if [ -f report/status.txt ]; then cat report/status.txt >> "$GITHUB_STEP_SUMMARY"; fi
+          echo '' >> "$GITHUB_STEP_SUMMARY"
+          echo 'A successful Actions run does NOT establish ABI compatibility, a bootable kernel, or readiness to flash.' >> "$GITHUB_STEP_SUMMARY"
