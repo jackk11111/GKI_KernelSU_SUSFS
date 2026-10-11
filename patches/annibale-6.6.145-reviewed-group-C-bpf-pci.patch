@@ -1,8 +1,7 @@
 diff --git a/kernel/fork.c b/kernel/fork.c
 --- a/kernel/fork.c
 +++ b/kernel/fork.c
-@@ -1234,8 +1234,12 @@
- 	tsk->last_mm_cid = -1;
+@@ -1235,6 +1235,10 @@
  	tsk->mm_cid_active = 0;
  	tsk->migrate_from_cpu = -1;
  #endif
@@ -13,9 +12,7 @@ diff --git a/kernel/fork.c b/kernel/fork.c
  	android_init_vendor_data(tsk, 1);
  	android_init_oem_data(tsk, 1);
  	android_init_dynamic_vendor_data(tsk);
- 	trace_android_vh_dup_task_struct(tsk, orig);
-@@ -2519,12 +2523,8 @@
- #endif
+@@ -2520,10 +2524,6 @@
  #ifdef CONFIG_BCACHE
  	p->sequential_io	= 0;
  	p->sequential_io_avg	= 0;
@@ -26,20 +23,17 @@ diff --git a/kernel/fork.c b/kernel/fork.c
  #endif
  
  	/* Perform scheduler related setup. Assign this task to a CPU. */
- 	retval = sched_fork(clone_flags, p);
 diff --git a/drivers/pci/controller/pci-host-common.c b/drivers/pci/controller/pci-host-common.c
 --- a/drivers/pci/controller/pci-host-common.c
 +++ b/drivers/pci/controller/pci-host-common.c
-@@ -72,8 +72,12 @@
- 	cfg = gen_pci_init(dev, bridge, ops);
+@@ -73,6 +73,10 @@
  	if (IS_ERR(cfg))
  		return PTR_ERR(cfg);
  
-+	/* Only renumber PCI buses when firmware has not requested probe-only. */
++	/* Do not reassign bus numbers if probe only */
 +	if (!pci_has_flag(PCI_PROBE_ONLY))
 +		pci_add_flags(PCI_REASSIGN_ALL_BUS);
 +
  	bridge->sysdata = cfg;
  	bridge->ops = (struct pci_ops *)&ops->pci_ops;
  	bridge->msi_domain = true;
- 
