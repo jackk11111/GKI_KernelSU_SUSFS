@@ -35,3 +35,20 @@ The official LunarisOS 3.12 GMS OTA 2026093005 is hosted at SourceForge; automat
 Keep our already built EvoX A17 OTA and original images untouched. Our experimental Linux 6.6.144 KMI8 KernelSU Next dev-susfs / SUSFS 2.3.0 AnyKernel3 compiled successfully in run 38141706061, **not boot verified**. The Linux 6.6.158 stable upstream release is newer but cannot be treated as drop-in Android GKI until ported and KMI ABI-checked. A KMI8 build with proper KMI and updated LTS is more correct than a fake KMI9; legitimate KMI9 must include matching vendor modules.
 
 **No flash, no repartitioning, no new OTA installation is authorized by this audit.**
+
+## Verified binary from suggested WildKernels r21 release — direct inspection
+
+Source release asset:
+`https://github.com/WildKernels/GKI_KernelSU_SUSFS/releases/download/r21/6.6.77-android15-2025-03-KernelSU-Next-AnyKernel3.zip`
+
+The asset SHA256 from the upstream GitHub release, independently checked by GitHub Actions:
+`fd02b62bd3c4860a73366db37dc17ae16e589a01084dcd2f719d59583b3c5758`.
+
+Read-only inspection run [38145903704](https://github.com/jackk11111/GKI_KernelSU_SUSFS/actions/runs/38145903704) inspected actual `Image` binary, not its filename, and printed:
+
+```text
+Linux version 6.6.77-android15-Wild (kleaf@build-host) ... 
+6.6.77-android15-Wild SMP preempt mod_unload modversions aarch64
+```
+
+The ZIP's `anykernel.sh` has `do.devicecheck=0`, empty `device.name1..5`, `block=boot`, and `is_slot_device=auto`. It is GENERIC, NOT specifically validated for annibale. The embedded kernel identity **does not match** the screenshot's `6.6.77-android15-9-g47903367` string. It might nevertheless be the underlying base with custom kernel release spoofing; exact binary identity of Lunaris is still UNKNOWN without its actual boot image or full unspoofed kernel evidence. Do **not** mistake this archive for a verified KMI9 kernel or flash it as such.
