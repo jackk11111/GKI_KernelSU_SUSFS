@@ -37,7 +37,7 @@ jobs:
           echo "START_PHASE=$phase" | tee -a report/phase.txt
           if ! git -C ack merge-base --is-ancestor 'v6.6.144^{commit}' 'v6.6.145^{commit}'; then
             echo "ANCESTRY_INCOMPLETE_IN_SHALLOW_FETCH; deepening only stable history"
-            git -C ack -c protocol.version=2 fetch -q --deepen=700 --filter=blob:none stable \
+            git -C ack -c protocol.version=2 fetch -q --deepen=950 --filter=blob:none stable \
               refs/tags/v6.6.144:refs/tags/v6.6.144 \
               refs/tags/v6.6.145:refs/tags/v6.6.145
           fi
