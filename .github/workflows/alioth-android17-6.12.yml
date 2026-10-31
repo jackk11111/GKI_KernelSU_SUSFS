@@ -52,15 +52,32 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            bc bison build-essential ccache cpio curl device-tree-compiler \
-            dwarves flex git kmod libdw-dev libelf-dev libncurses-dev \
-            libssl-dev make perl python3 rsync unzip wget zip zstd
+            bc bison build-essential ccache cmake cpio curl device-tree-compiler \
+            flex git kmod libdw-dev libelf-dev libncurses-dev \
+            libssl-dev make perl python3 rsync unzip wget zip zlib1g-dev zstd
+          echo "== Build pinned Dwarves/pahole v1.27 with dynamic per-CPU BTF allocation =="
+          PAHOLE_SRC="$RUNNER_TEMP/dwarves-v1.27"
+          PAHOLE_COMMIT="3e265dac5ec85b956c664464072196c37d2af4f3"
+          git clone --depth=1 --branch v1.27 --recurse-submodules https://github.com/acmel/dwarves.git "$PAHOLE_SRC"
+          test "$(git -C "$PAHOLE_SRC" rev-parse HEAD)" = "$PAHOLE_COMMIT"
+          grep -q 'encoder->percpu.allocated' "$PAHOLE_SRC/btf_encoder.c"
+          ! grep -q 'MAX_PERCPU_VAR_CNT' "$PAHOLE_SRC/btf_encoder.c"
+          cmake -S "$PAHOLE_SRC" -B "$PAHOLE_SRC/build" \
+            -D__LIB=lib -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local
+          cmake --build "$PAHOLE_SRC/build" --parallel "$(nproc)"
+          sudo cmake --install "$PAHOLE_SRC/build"
+          sudo ldconfig
+          echo "/usr/local/bin" >> "$GITHUB_PATH"
+          export PATH="/usr/local/bin:$PATH"
+          test "$(command -v pahole)" = "/usr/local/bin/pahole"
+          test "$(pahole --version)" = "v1.27"
+          echo "PAHOLE_DYNAMIC_PERCPU=PASS version=$(pahole --version) path=$(command -v pahole)"
+
           wget -q https://apt.llvm.org/llvm.sh -O /tmp/llvm.sh
           chmod +x /tmp/llvm.sh
           sudo /tmp/llvm.sh 21
           clang-21 --version
           ld.lld-21 --version
-          pahole --version
 
       - name: Validate Android kernel and SUSFS LKM build path
         shell: bash
