@@ -108,12 +108,17 @@ for symbol in \
   KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG KSU_SUSFS_SUS_MAP \
   KSU_SUSFS_OPEN_REDIRECT ANDROID_BINDER_IPC ANDROID_BINDERFS \
   DRM_MSM DRM_PANEL_SAMSUNG_AMS667XX01 TOUCHSCREEN_FT8756 \
-  SCSI_UFSHCD SCSI_UFS_QCOM F2FS_FS EROFS_FS; do
+  SCSI_UFSHCD SCSI_UFS_QCOM F2FS_FS EROFS_FS \
+  CFG80211 MAC80211 ATH11K ATH11K_PCI MHI_BUS MHI_BUS_PCI_GENERIC \
+  BT_QCA BT_HCIUART RPMSG_QCOM_GLINK RPMSG_QCOM_GLINK_RPM \
+  RPMSG_QCOM_GLINK_SMEM USB_DWC3_QCOM SERIAL_QCOM_GENI \
+  I2C_QCOM_GENI SPI_QCOM_GENI QCOM_GPI_DMA QCOM_GENI_SE \
+  TYPEC_QCOM_PMIC SND_SOC_QDSP6; do
   require_y "$symbol"
 done
 
 KERNEL_RELEASE="$(make -s -C "$KERNEL_DIR" O="$OUT" ARCH=arm64 LLVM=1 \
-  CC=clang-21 HOSTCC=clang-21 kernelrelease)"
+  CC=clang-21 HOSTCC=clang-21 LOCALVERSION=-alioth-a17 kernelrelease)"
 echo "KERNEL_RELEASE=$KERNEL_RELEASE"
 
 echo "== Build Image, DTBs and modules =="
@@ -135,7 +140,7 @@ cp "$OUT/.config" "$ART/kernel.config"
 echo "== Install modules for audit (not flashed by the first test package) =="
 make -C "$KERNEL_DIR" O="$OUT" ARCH=arm64 LLVM=1 LLVM_IAS=1 \
   CC=clang-21 HOSTCC=clang-21 \
-  INSTALL_MOD_PATH="$WORK/modules" modules_install
+  LOCALVERSION=-alioth-a17 INSTALL_MOD_PATH="$WORK/modules" INSTALL_MOD_STRIP=1 modules_install
 tar --zstd -cf "$ART/modules-$KERNEL_RELEASE.tar.zst" -C "$WORK/modules" .
 
 echo "== Package AnyKernel3 test ZIP =="
@@ -165,21 +170,26 @@ PATCH_VBMETA_FLAG=auto;
 . tools/ak3-core.sh;
 
 dump_boot;
-write_boot;
 
-# Mainline alioth instructions require the active DTBO slot to be erased:
-# the new complete alioth DTB is appended to Image-dtb.
+# Mainline alioth instructions require the active DTBO slot to be erased.
+# Validate the target and size before writing boot, then erase after repacking.
 DTBO_PART="/dev/block/bootdevice/by-name/dtbo${SLOT:-}";
 [ -e "$DTBO_PART" ] || DTBO_PART="/dev/block/bootdevice/by-name/dtbo";
+DTBO_BLOCKS=0;
 if [ -e "$DTBO_PART" ]; then
-  if ! command -v blockdev >/dev/null 2>&1; then
-    abort "blockdev is unavailable; refusing to leave the old DTBO active."
+  if ! command -v blockdev >/dev/null 2>&1 || ! command -v dd >/dev/null 2>&1; then
+    abort "blockdev/dd unavailable; refusing to flash with the old DTBO active."
   fi
   DTBO_BYTES="$(blockdev --getsize64 "$DTBO_PART")";
   DTBO_BLOCKS=$((DTBO_BYTES / 4096));
   if [ "$DTBO_BLOCKS" -le 0 ]; then
     abort "Could not determine the DTBO partition size."
   fi
+fi
+
+write_boot;
+
+if [ "$DTBO_BLOCKS" -gt 0 ]; then
   ui_print "Erasing active DTBO partition ($DTBO_BYTES bytes)...";
   dd if=/dev/zero of="$DTBO_PART" bs=4096 count="$DTBO_BLOCKS" conv=fsync || abort "DTBO erase failed.";
   sync;
