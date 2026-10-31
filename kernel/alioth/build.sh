@@ -63,6 +63,42 @@ git -C "$KERNEL_DIR" apply \
   --exclude=arch/arm64/boot/dts/qcom/Makefile \
   --exclude=drivers/gpu/drm/panel/Kconfig \
   --exclude=drivers/gpu/drm/panel/Makefile "$WORK/$DEVICE_PATCH"
+
+python3 - "$KERNEL_DIR/drivers/gpu/drm/panel/Kconfig" <<'PY'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+text = path.read_text()
+symbol = "config DRM_PANEL_SAMSUNG_AMS667XX01"
+anchor = "config DRM_PANEL_SAMSUNG_S6E88A0_AMS427AP24"
+symbol_count = text.count(symbol)
+anchor_count = text.count(anchor)
+
+if symbol_count > 1:
+    raise SystemExit(f"duplicate {symbol}: {symbol_count}")
+if symbol_count == 0:
+    if anchor_count != 1:
+        raise SystemExit(f"expected exactly one insertion anchor {anchor}, found {anchor_count}")
+    entry = """config DRM_PANEL_SAMSUNG_AMS667XX01
+\ttristate "Samsung AMS667XX01 panel"
+\tdepends on OF
+\tdepends on DRM_MIPI_DSI
+\tdepends on BACKLIGHT_CLASS_DEVICE
+\thelp
+\t  Say Y or M here if you want to enable support for the
+\t  Samsung AMS667XX01 FHD Plus (2400x1080@120Hz) CMD mode panel,
+\t  display panels, such as the one found in the POCO F3 smartphone.
+
+"""
+    text = text.replace(anchor, entry + anchor, 1)
+    path.write_text(text)
+
+if path.read_text().count(symbol) != 1:
+    raise SystemExit(f"failed to register exactly one {symbol}")
+print("KCONFIG_ENTRY=PASS DRM_PANEL_SAMSUNG_AMS667XX01")
+PY
+
 python3 - "$KERNEL_DIR" <<'PY'
 import pathlib
 import re
