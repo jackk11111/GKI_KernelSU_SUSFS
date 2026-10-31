@@ -203,3 +203,32 @@ if "dsc_slice_per_pkt" in source:
 panel.write_text(source)
 print("PANEL_DSC_HOST_COMPAT=PASS (2 slices per line, 1 slice per packet)")
 PY
+
+echo "== Remove duplicate label from the Alioth SD870 OPP extension =="
+python3 - "$KERNEL_DIR" <<'PY'
+import pathlib
+import sys
+
+dts = pathlib.Path(sys.argv[1]) / "arch/arm64/boot/dts/qcom/sm8250-xiaomi-alioth.dts"
+source = dts.read_text()
+old = "\tcpu7_opp21: opp-3187200000 {"
+new = "\topp-3187200000 {"
+
+if source.count(old) == 1:
+    source = source.replace(old, new, 1)
+elif source.count(new) == 1:
+    pass
+else:
+    raise SystemExit(
+        "Expected exactly one Alioth 3.1872 GHz OPP label to remove; "
+        f"label_count={source.count(old)}, node_count={source.count(new)}"
+    )
+
+if source.count("opp-3187200000 {") != 1:
+    raise SystemExit("Alioth 3.1872 GHz OPP node is missing or duplicated")
+if "cpu7_opp21: opp-3187200000" in source:
+    raise SystemExit("Duplicate cpu7_opp21 label remains on the 3.1872 GHz OPP")
+
+dts.write_text(source)
+print("ALIOTH_SD870_OPP_LABEL=PASS (unreferenced duplicate label removed)")
+PY
