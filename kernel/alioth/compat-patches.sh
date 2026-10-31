@@ -58,6 +58,36 @@ PY
 patch --dry-run -p1 --forward -f -d "$KERNEL_DIR" < "$FILTERED_PATCH"
 patch -p1 --forward -f -d "$KERNEL_DIR" < "$FILTERED_PATCH"
 
+echo "== Adapt PM8150B fuel gauge to Android Common 6.12 power-supply API =="
+python3 - "$KERNEL_DIR" <<'PY'
+import pathlib
+import sys
+
+root = pathlib.Path(sys.argv[1])
+header = (root / "include/linux/power_supply.h").read_text()
+source_path = root / "drivers/power/supply/qcom_fg.c"
+source = source_path.read_text()
+
+old = "chip->chg_psy = power_supply_get_by_reference(dev_fwnode(chip->dev),"
+new = "chip->chg_psy = devm_power_supply_get_by_phandle(chip->dev,"
+
+if "devm_power_supply_get_by_phandle" not in header:
+    raise SystemExit("Android Common 6.12 power_supply.h lacks devm_power_supply_get_by_phandle")
+if source.count(old) == 1:
+    source = source.replace(old, new, 1)
+elif source.count(new) != 1:
+    raise SystemExit(
+        "Expected exactly one qcom_fg charger lookup to adapt; "
+        f"new_api_count={source.count(old)}, legacy_api_count={source.count(new)}"
+    )
+
+if source.count(new) != 1 or "power_supply_get_by_reference(" in source:
+    raise SystemExit("qcom_fg power-supply API compatibility check failed")
+
+source_path.write_text(source)
+print("QCOM_FG_POWER_SUPPLY_API=PASS devm_power_supply_get_by_phandle (6.12)")
+PY
+
 python3 - "$KERNEL_DIR" <<'PY'
 import pathlib
 import sys
