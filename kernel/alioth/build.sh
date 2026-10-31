@@ -66,34 +66,6 @@ git -C "$KERNEL_DIR" apply \
   --exclude=drivers/gpu/drm/panel/Kconfig \
   --exclude=drivers/gpu/drm/panel/Makefile "$WORK/$DEVICE_PATCH"
 
-# Android Common already labels the 3.0912 GHz CPU7 OPP as cpu7_opp21.
-# The alioth SD870 3.1872 GHz boost OPP is the next entry and must be cpu7_opp22.
-python3 - "$KERNEL_DIR" <<'PY'
-import pathlib
-import re
-import sys
-
-root = pathlib.Path(sys.argv[1])
-dts = root / "arch/arm64/boot/dts/qcom/sm8250-xiaomi-alioth.dts"
-base = root / "arch/arm64/boot/dts/qcom/sm8250.dtsi"
-text = dts.read_text()
-base_text = base.read_text()
-
-if len(re.findall(r'\bcpu7_opp21\s*:\s*opp-3091200000', base_text)) != 1:
-    raise SystemExit("Expected the Android Common cpu7_opp21 label on 3.0912 GHz exactly once")
-if len(re.findall(r'\bcpu7_opp21\s*:\s*opp-3187200000', text)) != 1:
-    raise SystemExit("Expected exactly one alioth 3.1872 GHz node with the conflicting cpu7_opp21 label")
-if re.search(r'\bcpu7_opp22\s*:', base_text) or re.search(r'\bcpu7_opp22\s*:', text):
-    raise SystemExit("cpu7_opp22 already exists; refusing to rename blindly")
-
-text = text.replace("cpu7_opp21: opp-3187200000", "cpu7_opp22: opp-3187200000")
-dts.write_text(text)
-
-if "cpu7_opp22: opp-3187200000" not in dts.read_text():
-    raise SystemExit("Failed to assign the unique alioth CPU7 OPP label")
-print("ALIOTH_CPU7_OPP_LABEL=PASS cpu7_opp21=3.0912GHz cpu7_opp22=3.1872GHz")
-PY
-
 echo "== Backport PM8150B power drivers and adapt the panel to Android Common 6.12 =="
 bash "$ROOT/kernel/alioth/compat-patches.sh" "$KERNEL_DIR" "$WORK"
 
