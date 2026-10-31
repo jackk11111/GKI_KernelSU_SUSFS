@@ -45,8 +45,7 @@ KERNEL_VERSION="$(make -s -C "$KERNEL_DIR" ARCH=arm64 kernelversion)"
 KERNEL_SUBLEVEL="${KERNEL_VERSION##*.}"
 echo "ANDROID_COMMON_COMMIT=$ANDROID_COMMON_COMMIT"
 echo "ANDROID_COMMON_DATE=$ANDROID_COMMON_DATE"
-echo "KERNEL_VERSION=$KERNEL_VERSION
-KERNEL_SUBLEVEL=$KERNEL_SUBLEVEL"
+echo "KERNEL_VERSION=$KERNEL_VERSION"
 echo "KERNEL_SUBLEVEL=$KERNEL_SUBLEVEL"
 
 echo "== Fetch and verify the alioth mainline device patch =="
@@ -114,7 +113,62 @@ test -d "$WORK/susfs4ksu/kernel_patches/fs"
 test -d "$WORK/susfs4ksu/kernel_patches/include/linux"
 cp -av "$WORK/susfs4ksu/kernel_patches/fs/"* "$KERNEL_DIR/fs/"
 cp -av "$WORK/susfs4ksu/kernel_patches/include/linux/"* "$KERNEL_DIR/include/linux/"
+# Android 16 / 6.12 SUSFS compatibility transforms. These mirror the
+# maintained 6.12 path in this repository's SUSFS actions. Temporary edits
+# only reshape source context so the upstream patch can apply.
+DMA_INCLUDE_STATE="$WORK/exec_dma_include.json"
+VMA_RENAME_STATE="$WORK/vma_data_pages.count"
+
+if [ "$KERNEL_SUBLEVEL" -ge 58 ]; then
+  python3 - "$KERNEL_DIR/fs/exec.c" "$DMA_INCLUDE_STATE" <<'PY'
+import json
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+state_path = pathlib.Path(sys.argv[2])
+lines = path.read_text().splitlines(keepends=True)
+needle = "#include <linux/dma-buf.h>"
+matches = [i for i, line in enumerate(lines) if line.strip() == needle]
+if len(matches) > 1:
+    raise SystemExit(f"expected at most one {needle}, found {len(matches)}")
+state = {"removed": False}
+if matches:
+    index = matches[0]
+    state = {
+        "removed": True,
+        "before": lines[index - 1].rstrip("\n") if index > 0 else None,
+        "after": lines[index + 1].rstrip("\n") if index + 1 < len(lines) else None,
+    }
+    del lines[index]
+    path.write_text("".join(lines))
+state_path.write_text(json.dumps(state))
+print(f"SUSFS_FAKE_EXEC_DMA_INCLUDE_REMOVED={state['removed']}")
+PY
+fi
+
+if [ "$KERNEL_SUBLEVEL" -ge 69 ]; then
+  python3 - "$KERNEL_DIR/fs/proc/task_mmu.c" "$VMA_RENAME_STATE" <<'PY'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+text = path.read_text()
+count = text.count("vma_data_pages")
+if count:
+    path.write_text(text.replace("vma_data_pages", "vma_pages"))
+pathlib.Path(sys.argv[2]).write_text(str(count))
+print(f"SUSFS_FAKE_VMA_DATA_PAGES_RENAMES={count}")
+PY
+fi
+
+if [ "$KERNEL_SUBLEVEL" -ge 92 ]; then
+  python3 "$ROOT/.github/scripts/susfs_fake_612.py" \
+    "$KERNEL_DIR/fs/proc/task_mmu.c" apply
+fi
+
 patch --batch --forward -p1 -d "$KERNEL_DIR" < "$SUSFS_PATCH"
+
 
 # Restore the temporary 6.12 patch-context transforms before compiling.
 if [ "$KERNEL_SUBLEVEL" -ge 92 ]; then
@@ -175,60 +229,6 @@ if grep -q 'VMA_PAD_START(' "$TASK_MMU" && \
    ! grep -qE '#include <linux/pgsize_migration(_inline)?\.h>|define VMA_PAD_START' "$TASK_MMU"; then
   sed -i '1a #ifndef VMA_PAD_START\n#define VMA_PAD_START(vma) ((vma)->vm_end)\n#endif' "$TASK_MMU"
   echo "SUSFS_VMA_PAD_START_FALLBACK=ADDED"
-fi
-
-# Android 16 / 6.12 SUSFS compatibility transforms. These mirror the
-# already-maintained 6.12 path in .github/actions/susfs-patches and
-# susfs-revert-patches. The temporary edits exist only to match patch context.
-DMA_INCLUDE_STATE="$WORK/exec_dma_include.json"
-VMA_RENAME_STATE="$WORK/vma_data_pages.count"
-
-if [ "$KERNEL_SUBLEVEL" -ge 58 ]; then
-  python3 - "$KERNEL_DIR/fs/exec.c" "$DMA_INCLUDE_STATE" <<'PY'
-import json
-import pathlib
-import sys
-
-path = pathlib.Path(sys.argv[1])
-state_path = pathlib.Path(sys.argv[2])
-lines = path.read_text().splitlines(keepends=True)
-needle = "#include <linux/dma-buf.h>"
-matches = [i for i, line in enumerate(lines) if line.strip() == needle]
-if len(matches) > 1:
-    raise SystemExit(f"expected at most one {needle}, found {len(matches)}")
-state = {"removed": False}
-if matches:
-    index = matches[0]
-    state = {
-        "removed": True,
-        "before": lines[index - 1].rstrip("\n") if index > 0 else None,
-        "after": lines[index + 1].rstrip("\n") if index + 1 < len(lines) else None,
-    }
-    del lines[index]
-    path.write_text("".join(lines))
-state_path.write_text(json.dumps(state))
-print(f"SUSFS_FAKE_EXEC_DMA_INCLUDE_REMOVED={state['removed']}")
-PY
-fi
-
-if [ "$KERNEL_SUBLEVEL" -ge 69 ]; then
-  python3 - "$KERNEL_DIR/fs/proc/task_mmu.c" "$VMA_RENAME_STATE" <<'PY'
-import pathlib
-import sys
-
-path = pathlib.Path(sys.argv[1])
-text = path.read_text()
-count = text.count("vma_data_pages")
-if count:
-    path.write_text(text.replace("vma_data_pages", "vma_pages"))
-pathlib.Path(sys.argv[2]).write_text(str(count))
-print(f"SUSFS_FAKE_VMA_DATA_PAGES_RENAMES={count}")
-PY
-fi
-
-if [ "$KERNEL_SUBLEVEL" -ge 92 ]; then
-  python3 "$ROOT/.github/scripts/susfs_fake_612.py" \
-    "$KERNEL_DIR/fs/proc/task_mmu.c" apply
 fi
 
 
