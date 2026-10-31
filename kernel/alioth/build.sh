@@ -227,7 +227,7 @@ done
 echo "== Fast device preflight: Alioth DTS, panel and PM8150B power drivers =="
 make -C "$KERNEL_DIR" O="$OUT" ARCH=arm64 LLVM=-21 LLVM_IAS=1 \
   CC=clang-21 HOSTCC=clang-21 \
-  arch/arm64/boot/dts/qcom/sm8250-xiaomi-alioth.dtb \
+  qcom/sm8250-xiaomi-alioth.dtb \
   drivers/gpu/drm/panel/panel-samsung-ams667xx01.o \
   drivers/power/supply/qcom_fg.o \
   drivers/power/supply/qcom_pm8150b_charger.o
