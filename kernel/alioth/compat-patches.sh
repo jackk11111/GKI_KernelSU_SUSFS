@@ -9,11 +9,90 @@ PATCH_FILE="$WORK/0011-qcom-pm8150b-charger.patch"
 mkdir -p "$WORK"
 
 echo "== Fetch and apply PM8150B charger/fuel-gauge drivers =="
+EXPECTED_PATCH_BLOB="671fdee7df686e5636778ea5af6a979ab876373a"
 curl -fL --retry 4 --retry-delay 3 "$PATCH_URL" -o "$PATCH_FILE"
+ACTUAL_PATCH_BLOB="$(git -C "$KERNEL_DIR" hash-object "$PATCH_FILE")"
+if [ "$ACTUAL_PATCH_BLOB" != "$EXPECTED_PATCH_BLOB" ]; then
+  echo "ERROR: PM8150B patch blob changed: expected $EXPECTED_PATCH_BLOB, got $ACTUAL_PATCH_BLOB" >&2
+  exit 1
+fi
 grep -q 'drivers/power/supply/qcom_fg.c' "$PATCH_FILE"
 grep -q 'drivers/power/supply/qcom_pm8150b_charger.c' "$PATCH_FILE"
-patch --dry-run -p1 --forward -f -d "$KERNEL_DIR" < "$PATCH_FILE"
-patch -p1 --forward -f -d "$KERNEL_DIR" < "$PATCH_FILE"
+
+# The patch's Makefile hunk targets a different Android kernel tree layout.
+# Keep its Kconfig and driver-source hunks; register the two objects below
+# using idempotent exact-line checks against this pinned 6.12 source.
+FILTERED_PATCH="$WORK/0011-qcom-pm8150b-charger-no-makefile.patch"
+python3 - "$PATCH_FILE" "$FILTERED_PATCH" <<'PY'
+import pathlib
+import sys
+
+source = pathlib.Path(sys.argv[1]).read_text().splitlines(keepends=True)
+target = pathlib.Path(sys.argv[2])
+filtered = []
+skip = False
+removed = 0
+
+for line in source:
+    if line.startswith("diff -rupbN "):
+        parts = line.split()
+        old_path = parts[2] if len(parts) > 2 else ""
+        skip = old_path.endswith("/drivers/power/supply/Makefile")
+        if skip:
+            removed += 1
+            continue
+    if not skip:
+        filtered.append(line)
+
+if removed != 1:
+    raise SystemExit(f"Expected to exclude one power-supply Makefile hunk, found {removed}")
+if not any("drivers/power/supply/qcom_fg.c" in line for line in filtered):
+    raise SystemExit("Filtered patch lost qcom_fg.c")
+if not any("drivers/power/supply/qcom_pm8150b_charger.c" in line for line in filtered):
+    raise SystemExit("Filtered patch lost qcom_pm8150b_charger.c")
+
+target.write_text("".join(filtered))
+print("PATCH_MAKEFILE_HUNK_EXCLUDED=PASS")
+PY
+
+patch --dry-run -p1 --forward -f -d "$KERNEL_DIR" < "$FILTERED_PATCH"
+patch -p1 --forward -f -d "$KERNEL_DIR" < "$FILTERED_PATCH"
+
+python3 - "$KERNEL_DIR" <<'PY'
+import pathlib
+import sys
+
+root = pathlib.Path(sys.argv[1])
+makefile = root / "drivers/power/supply/Makefile"
+lines = makefile.read_text().splitlines(keepends=True)
+entries = (
+    "obj-$(CONFIG_CHARGER_QCOM_SMB5) += qcom_pm8150b_charger.o",
+    "obj-$(CONFIG_BATTERY_QCOM_FG) += qcom_fg.o",
+)
+
+for entry in entries:
+    count = sum(line.rstrip("\r\n") == entry for line in lines)
+    if count > 1:
+        raise SystemExit(f"Duplicate power-supply registration: {entry}")
+    if count == 0:
+        if lines and not lines[-1].endswith("\n"):
+            lines[-1] += "\n"
+        lines.append(entry + "\n")
+    print(f"POWER_SUPPLY_REGISTRATION=PASS {entry}")
+
+makefile.write_text("".join(lines))
+kconfig = (root / "drivers/power/supply/Kconfig").read_text()
+for symbol in ("CHARGER_QCOM_SMB5", "BATTERY_QCOM_FG"):
+    if kconfig.count(f"config {symbol}") != 1:
+        raise SystemExit(f"Expected exactly one Kconfig symbol: {symbol}")
+
+for source in ("qcom_fg.c", "qcom_pm8150b_charger.c"):
+    if not (root / "drivers/power/supply" / source).is_file():
+        raise SystemExit(f"Missing PM8150B driver source: {source}")
+
+print("PM8150B_KCONFIG_AND_SOURCES=PASS")
+PY
+
 echo "PM8150B_DRIVERS=PASS"
 
 echo "== Add the PM8150B charger and fuel-gauge DT nodes missing from Android Common 6.12 =="
