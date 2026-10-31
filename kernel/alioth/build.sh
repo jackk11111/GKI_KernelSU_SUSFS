@@ -210,7 +210,7 @@ require_y() {
   fi
 }
 for symbol in \
-  KSU ANDROID_BINDER_IPC ANDROID_BINDERFS \
+  KSU ANDROID_BINDER_IPC ANDROID_BINDERFS BOOT_CONFIG KALLSYMS_ALL \
   POWER_SUPPLY IIO SPMI SPMI_MSM_PMIC_ARB MFD_SPMI_PMIC \
   CHARGER_QCOM_SMB5 BATTERY_QCOM_FG \
   DRM_MSM DRM_PANEL_SAMSUNG_AMS667XX01 TOUCHSCREEN_FT8756 \
@@ -244,11 +244,55 @@ make -C "$KERNEL_DIR" O="$OUT" ARCH=arm64 LLVM=-21 LLVM_IAS=1 \
   KBUILD_BUILD_VERSION=1 LOCALVERSION=-alioth-a17 \
   -j"$(nproc)" Image dtbs modules
 echo "== Build SUSFS 2.3.0 LKM against this exact kernel =="
+# SUSFS intentionally imports several non-exported vmlinux symbols.
+# KernelSU Next's ksud insmod absolutizes these from /proc/kallsyms at load time;
+# KBUILD_MODPOST_WARN is therefore required only for this external LKM build.
 make -C "$KERNEL_DIR" O="$OUT" M="$SUSFS_DIR" ARCH=arm64 \
+  KBUILD_MODPOST_WARN=1 \
   LLVM=-21 LLVM_IAS=1 CC=clang-21 HOSTCC=clang-21 \
   LOCALVERSION=-alioth-a17 -j"$(nproc)" modules
 SUSFS_KO="$SUSFS_DIR/susfs_guard_lkm.ko"
 test -s "$SUSFS_KO"
+
+echo "== Verify every SUSFS unresolved import is available through kallsyms =="
+python3 - "$SUSFS_KO" "$OUT/System.map" <<'PY'
+import pathlib
+import subprocess
+import sys
+
+module = pathlib.Path(sys.argv[1])
+system_map = pathlib.Path(sys.argv[2])
+if not module.is_file() or not system_map.is_file():
+    raise SystemExit(f"Missing SUSFS module or kernel System.map: {module}, {system_map}")
+
+def normalize(name):
+    for marker in ("$", ".llvm."):
+        if marker in name:
+            name = name.split(marker, 1)[0]
+    return name
+
+nm = subprocess.check_output(["nm", "-u", str(module)], text=True)
+undefined = sorted({line.split()[-1] for line in nm.splitlines() if line.split()})
+available = set()
+for line in system_map.read_text().splitlines():
+    fields = line.split()
+    if len(fields) >= 3:
+        available.add(normalize(fields[2]))
+
+missing = [name for name in undefined if normalize(name) not in available]
+if missing:
+    print("SUSFS_IMPORTS_MISSING_FROM_KALLSYMS:")
+    for name in missing:
+        print(f"  {name}")
+    raise SystemExit(1)
+
+print(f"SUSFS_IMPORT_RESOLUTION=PASS undefined={len(undefined)} System.map={system_map}")
+print("SUSFS_UNEXPORTED_EXPECTED=" + ",".join(
+    name for name in ("init_mm", "__set_fixmap", "copy_to_kernel_nofault",
+                      "dcache_clean_inval_poc", "saved_boot_config")
+    if name in undefined
+))
+PY
 SUSFS_VERMAGIC="$(modinfo -F vermagic "$SUSFS_KO")"
 case "$SUSFS_VERMAGIC" in
   "$KERNEL_RELEASE"*) echo "SUSFS_VERMAGIC=PASS $SUSFS_VERMAGIC" ;;
