@@ -1,0 +1,90 @@
+name: Alioth Android 17 / Linux 6.18 Kernel
+
+on:
+  push:
+    branches:
+      - alioth/android17-6.18-lab
+    paths:
+      - "kernel/alioth/**"
+      - ".github/workflows/alioth-android17-6.18.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: alioth-android17-6.18-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-alioth:
+    name: Build POCO F3 alioth kernel 6.18
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - name: Checkout lab branch
+        uses: actions/checkout@v4
+
+      - name: Free runner disk space
+        uses: endersonmenezes/free-disk-space@v4
+        with:
+          remove_android: true
+          remove_dotnet: true
+          remove_haskell: true
+          remove_tool_cache: true
+          remove_swap: true
+          remove_packages: "azure-cli google-cloud-cli microsoft-edge-stable google-chrome-stable firefox postgresql* temurin-* *llvm* mysql* dotnet-sdk-*"
+          remove_packages_one_command: true
+          remove_folders: "/usr/share/swift /usr/share/miniconda /usr/share/az* /usr/local/lib/node_modules /usr/local/share/chromium /usr/local/share/powershell /usr/local/julia /usr/local/aws-cli /usr/local/aws-sam-cli /usr/share/gradle"
+          rm_cmd: "rmz"
+          rmz_version: "3.2.0"
+          testing: false
+
+      - name: Add swap for LTO and module builds
+        uses: pierotofy/set-swap-space@master
+        with:
+          swap-size-gb: 16
+
+      - name: Install kernel build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc bison build-essential ccache cpio curl device-tree-compiler \
+            dwarves flex git kmod libdw-dev libelf-dev libncurses-dev \
+            libssl-dev make perl python3 rsync unzip wget zip zstd
+          wget -q https://apt.llvm.org/llvm.sh -O /tmp/llvm.sh
+          chmod +x /tmp/llvm.sh
+          sudo /tmp/llvm.sh 21
+          clang-21 --version
+          ld.lld-21 --version
+          pahole --version
+
+      - name: Validate build script syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n kernel/alioth/build.sh
+          test -s kernel/alioth/alioth.config
+          grep -q '^CONFIG_KSU=y$' kernel/alioth/alioth.config
+          grep -q '^CONFIG_KSU_SUSFS=y$' kernel/alioth/alioth.config
+          echo "STATIC_PREFLIGHT=PASS"
+
+      - name: Build kernel and flashable package
+        shell: bash
+        env:
+          ANDROID_COMMON_REF: android17-6.18
+        run: |
+          set -euo pipefail
+          bash kernel/alioth/build.sh
+
+      - name: Upload kernel artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: POCO-F3-alioth-Android17-Linux-6.18-KSU-Next-3.4.2-SUSFS
+          path: alioth-artifacts/*
+          if-no-files-found: error
+          retention-days: 14
