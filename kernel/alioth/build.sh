@@ -184,7 +184,6 @@ echo "SUSFS_VERSION=$SUSFS_VERSION"
 echo "SUSFS_ABI_VERSION=$SUSFS_ABI_VERSION"
 
 echo "== Configure Android + alioth + KSU/SUSFS =="
-echo "== Configure Android + alioth + KSU/SUSFS =="
 mkdir -p "$OUT"
 cp "$WORK/$PMOS_CONFIG" "$OUT/.config"
 make -C "$KERNEL_DIR" O="$OUT" ARCH=arm64 LLVM=-21 LLVM_IAS=1 \
@@ -402,11 +401,13 @@ INFO
   cd "$ART"
   sha256sum Image Image-dtb sm8250-xiaomi-alioth.dtb kernel.config \
     "Alioth-EvoX-Android17-android16-6.12-KSU-Next-v3.4.2-SUSFS-2.3.0.zip" \
+    "Alioth-SUSFS-2.3.0-KSU-Next-3.4.2-LKM.zip" \
+    "susfs_guard_lkm.ko" "susfs_guard_lkm.modinfo.txt" \
     "KernelSU_Next_v3.4.2_33355-release.apk" > SHA256SUMS
 )
 
 echo "BUILD_RESULT=PASS"
 echo "KERNEL_RELEASE=$KERNEL_RELEASE"
 echo "KSU_NEXT=$ACTUAL_KSU_COMMIT"
-echo "SUSFS=$SUSFS_COMMIT"
+echo "SUSFS=$SUSFS_VERSION ($SUSFS_ABI_VERSION)"
 echo "ARTIFACTS=$ART"
