@@ -79,11 +79,11 @@ base = root / "arch/arm64/boot/dts/qcom/sm8250.dtsi"
 text = dts.read_text()
 base_text = base.read_text()
 
-if len(re.findall(r'\\bcpu7_opp21\\s*:\\s*opp-3091200000', base_text)) != 1:
+if len(re.findall(r'\bcpu7_opp21\s*:\s*opp-3091200000', base_text)) != 1:
     raise SystemExit("Expected the Android Common cpu7_opp21 label on 3.0912 GHz exactly once")
-if len(re.findall(r'\\bcpu7_opp21\\s*:\\s*opp-3187200000', text)) != 1:
+if len(re.findall(r'\bcpu7_opp21\s*:\s*opp-3187200000', text)) != 1:
     raise SystemExit("Expected exactly one alioth 3.1872 GHz node with the conflicting cpu7_opp21 label")
-if re.search(r'\\bcpu7_opp22\\s*:', base_text) or re.search(r'\\bcpu7_opp22\\s*:', text):
+if re.search(r'\bcpu7_opp22\s*:', base_text) or re.search(r'\bcpu7_opp22\s*:', text):
     raise SystemExit("cpu7_opp22 already exists; refusing to rename blindly")
 
 text = text.replace("cpu7_opp21: opp-3187200000", "cpu7_opp22: opp-3187200000")
