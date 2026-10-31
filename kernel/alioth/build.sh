@@ -85,12 +85,12 @@ patch --batch --forward -p1 -d "$KERNEL_DIR" < "$SUSFS_PATCH"
 echo "== Configure Android + alioth + KSU/SUSFS =="
 mkdir -p "$OUT"
 cp "$WORK/$PMOS_CONFIG" "$OUT/.config"
-make -C "$KERNEL_DIR" O="$OUT" ARCH=arm64 LLVM=1 LLVM_IAS=1 \
+make -C "$KERNEL_DIR" O="$OUT" ARCH=arm64 LLVM=-21 LLVM_IAS=1 \
   CC=clang-21 HOSTCC=clang-21 olddefconfig
 
 "$KERNEL_DIR/scripts/kconfig/merge_config.sh" -m -O "$OUT" \
   "$OUT/.config" "$ROOT/kernel/alioth/alioth.config"
-make -C "$KERNEL_DIR" O="$OUT" ARCH=arm64 LLVM=1 LLVM_IAS=1 \
+make -C "$KERNEL_DIR" O="$OUT" ARCH=arm64 LLVM=-21 LLVM_IAS=1 \
   CC=clang-21 HOSTCC=clang-21 olddefconfig
 
 require_y() {
@@ -117,12 +117,12 @@ for symbol in \
   require_y "$symbol"
 done
 
-KERNEL_RELEASE="$(make -s -C "$KERNEL_DIR" O="$OUT" ARCH=arm64 LLVM=1 \
+KERNEL_RELEASE="$(make -s -C "$KERNEL_DIR" O="$OUT" ARCH=arm64 LLVM=-21 \
   CC=clang-21 HOSTCC=clang-21 LOCALVERSION=-alioth-a17 kernelrelease)"
 echo "KERNEL_RELEASE=$KERNEL_RELEASE"
 
 echo "== Build Image, DTBs and modules =="
-make -C "$KERNEL_DIR" O="$OUT" ARCH=arm64 LLVM=1 LLVM_IAS=1 \
+make -C "$KERNEL_DIR" O="$OUT" ARCH=arm64 LLVM=-21 LLVM_IAS=1 \
   CC=clang-21 HOSTCC=clang-21 \
   KBUILD_BUILD_USER=alioth KBUILD_BUILD_HOST=github-actions \
   KBUILD_BUILD_VERSION=1 LOCALVERSION=-alioth-a17 \
@@ -138,7 +138,7 @@ cp "$DTB" "$ART/sm8250-xiaomi-alioth.dtb"
 cp "$OUT/.config" "$ART/kernel.config"
 
 echo "== Install modules for audit (not flashed by the first test package) =="
-make -C "$KERNEL_DIR" O="$OUT" ARCH=arm64 LLVM=1 LLVM_IAS=1 \
+make -C "$KERNEL_DIR" O="$OUT" ARCH=arm64 LLVM=-21 LLVM_IAS=1 \
   CC=clang-21 HOSTCC=clang-21 \
   LOCALVERSION=-alioth-a17 INSTALL_MOD_PATH="$WORK/modules" INSTALL_MOD_STRIP=1 modules_install
 tar --zstd -cf "$ART/modules-$KERNEL_RELEASE.tar.zst" -C "$WORK/modules" .
