@@ -63,17 +63,36 @@ jobs:
           ld.lld-21 --version
           pahole --version
 
-      - name: Validate build script and 6.12 compatibility helper
+      - name: Validate kernel and SUSFS LKM build path
         shell: bash
         run: |
           set -euo pipefail
           bash -n kernel/alioth/build.sh
-          python3 -m py_compile .github/scripts/susfs_fake_612.py
           test -s kernel/alioth/alioth.config
-          grep -q '^CONFIG_KSU=y$' kernel/alioth/alioth.config
-          grep -q '^CONFIG_KSU_SUSFS=y$' kernel/alioth/alioth.config
+          grep -q '^CONFIG_KSU=y
+
+      - name: Build kernel and flashable test package
+        shell: bash
+        env:
+          ANDROID_COMMON_REF: android16-6.12-2026-09
+        run: |
+          set -euo pipefail
+          bash kernel/alioth/build.sh
+
+      - name: Upload kernel artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: POCO-F3-alioth-EvoX-Android17-android16-6.12-KSU-Next-3.4.2-SUSFS
+          path: alioth-artifacts/*
+          if-no-files-found: error
+          retention-days: 14
+ kernel/alioth/alioth.config
+          ! grep -q 'CONFIG_KSU_SUSFS' kernel/alioth/alioth.config
           grep -q 'android16-6.12-2026-09' kernel/alioth/build.sh
-          grep -q 'gki-android16-6.12' kernel/alioth/build.sh
+          grep -q '2.3.0-gki' kernel/alioth/build.sh
+          grep -q 'kernel/susfs' kernel/alioth/build.sh
+          ! grep -q 'susfs4ksu.git' kernel/alioth/build.sh
           ! grep -q 'android17-6.18' kernel/alioth/build.sh
           echo "STATIC_PREFLIGHT=PASS"
 
