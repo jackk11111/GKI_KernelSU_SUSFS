@@ -53,7 +53,7 @@ retry curl -fL --retry 4 --retry-delay 3 \
   "$PMA_BASE/$DEVICE_PATCH" -o "$WORK/$DEVICE_PATCH"
 echo "$DEVICE_PATCH_SHA512  $WORK/$DEVICE_PATCH" | sha512sum -c -
 # The pinned mainline patch has two one-line Makefile hunks whose surrounding
-# lists were reordered in Android Common 6.18. Apply every other hunk verbatim,
+# lists can differ between Android Common release branches. Apply every other hunk verbatim,
 # then add those two entries idempotently instead of changing source code.
 git -C "$KERNEL_DIR" apply --check --verbose \
   --exclude=arch/arm64/boot/dts/qcom/Makefile \
@@ -366,6 +366,7 @@ ANDROID_COMMON_REF=$ANDROID_COMMON_REF
 ANDROID_COMMON_COMMIT=$ANDROID_COMMON_COMMIT
 ANDROID_COMMON_COMMIT_DATE=$ANDROID_COMMON_DATE
 KERNEL_VERSION=$KERNEL_VERSION
+KERNEL_SUBLEVEL=$KERNEL_SUBLEVEL
 KERNEL_RELEASE=$KERNEL_RELEASE
 DEVICE_PATCH_REPO=nasaarmas/pmaports-alioth
 DEVICE_PATCH_COMMIT=$PMA_COMMIT
@@ -390,7 +391,7 @@ INFO
 (
   cd "$ART"
   sha256sum Image Image-dtb sm8250-xiaomi-alioth.dtb kernel.config \
-    "Alioth-Android17-6.18-KSU-Next-v3.4.2-SUSFS-2.3.0.zip" \
+    "Alioth-EvoX-Android17-android16-6.12-KSU-Next-v3.4.2-SUSFS-2.3.0.zip" \
     "KernelSU_Next_v3.4.2_33355-release.apk" > SHA256SUMS
 )
 
