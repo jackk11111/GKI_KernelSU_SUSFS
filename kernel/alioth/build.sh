@@ -75,9 +75,9 @@ def append_once(relative, entry):
     lines = path.read_text().splitlines()
     if entry not in lines:
         with path.open("a") as stream:
-            if path.stat().st_size and not path.read_bytes().endswith(b"\\n"):
-                stream.write("\\n")
-            stream.write(entry + "\\n")
+            if path.stat().st_size and not path.read_bytes().endswith(b"\n"):
+                stream.write("\n")
+            stream.write(entry + "\n")
     if path.read_text().splitlines().count(entry) != 1:
         raise SystemExit(f"Expected exactly one registration in {relative}: {entry}")
     print(f"REGISTRATION=PASS {relative}: {entry}")
@@ -94,33 +94,33 @@ append_once(
 kconfig = root / "drivers/gpu/drm/panel/Kconfig"
 text = kconfig.read_text()
 symbol = "config DRM_PANEL_SAMSUNG_AMS667XX01"
-if len(re.findall(r"^" + re.escape(symbol) + r"\\s*$", text, re.M)) > 1:
+if len(re.findall(r"^" + re.escape(symbol) + r"\s*$", text, re.M)) > 1:
     raise SystemExit("Duplicate DRM_PANEL_SAMSUNG_AMS667XX01 Kconfig symbol")
-if not re.search(r"^" + re.escape(symbol) + r"\\s*$", text, re.M):
+if not re.search(r"^" + re.escape(symbol) + r"\s*$", text, re.M):
     anchors = list(re.finditer(
-        r"^config DRM_PANEL_SAMSUNG_AMS639RQ08\\s*$", text, re.M
+        r"^config DRM_PANEL_SAMSUNG_AMS639RQ08\s*$", text, re.M
     ))
     if len(anchors) != 1:
         raise SystemExit(
             f"Expected one AMS639RQ08 Kconfig anchor, found {len(anchors)}"
         )
-    next_symbol = re.search(r"^config [A-Z0-9_]+\\s*$", text[anchors[0].end():], re.M)
+    next_symbol = re.search(r"^config [A-Z0-9_]+\s*$", text[anchors[0].end():], re.M)
     if not next_symbol:
         raise SystemExit("Could not find next Kconfig symbol after AMS639RQ08")
     insert_at = anchors[0].end() + next_symbol.start()
     block = (
-        "config DRM_PANEL_SAMSUNG_AMS667XX01\\n"
-        '\\ttristate "Samsung AMS667XX01 panel"\\n'
-        "\\tdepends on OF\\n"
-        "\\tdepends on DRM_MIPI_DSI\\n"
-        "\\tdepends on BACKLIGHT_CLASS_DEVICE\\n"
-        "\\thelp\\n"
-        "\\t  Say Y or M here to enable the Samsung AMS667XX01 FHD Plus\\n"
-        "\\t  (2400x1080@120Hz) CMD mode panel used by the POCO F3.\\n"
-        "\\n"
+        "config DRM_PANEL_SAMSUNG_AMS667XX01\n"
+        '\ttristate "Samsung AMS667XX01 panel"\n'
+        "\tdepends on OF\n"
+        "\tdepends on DRM_MIPI_DSI\n"
+        "\tdepends on BACKLIGHT_CLASS_DEVICE\n"
+        "\thelp\n"
+        "\t  Say Y or M here to enable the Samsung AMS667XX01 FHD Plus\n"
+        "\t  (2400x1080@120Hz) CMD mode panel used by the POCO F3.\n"
+        "\n"
     )
     kconfig.write_text(text[:insert_at] + block + text[insert_at:])
-if len(re.findall(r"^" + re.escape(symbol) + r"\\s*$", kconfig.read_text(), re.M)) != 1:
+if len(re.findall(r"^" + re.escape(symbol) + r"\s*$", kconfig.read_text(), re.M)) != 1:
     raise SystemExit("Alioth panel Kconfig registration missing or duplicated")
 print("KCONFIG_REGISTRATION=PASS DRM_PANEL_SAMSUNG_AMS667XX01")
 PY
