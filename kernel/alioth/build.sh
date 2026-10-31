@@ -75,9 +75,9 @@ for relative, entry in entries.items():
     content = path.read_text()
     if entry not in content.splitlines():
         with path.open("a") as stream:
-            if content and not content.endswith("\\n"):
-                stream.write("\\n")
-            stream.write(entry + "\\n")
+            if content and not content.endswith("\n"):
+                stream.write("\n")
+            stream.write(entry + "\n")
     if entry not in path.read_text().splitlines():
         raise SystemExit(f"Failed to register alioth build entry in {relative}")
     print(f"MAKEFILE_ENTRY=PASS {relative}: {entry}")
