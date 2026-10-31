@@ -8,7 +8,7 @@ This is an isolated kernel-port experiment. It does not modify the repository's 
 - ROM target: Evolution X Android 17 userspace (ROM build is a later phase).
 - Kernel source: Android Common release branch `android16-6.12-2026-09`, pinned to commit `5eaaf89e924b6948fd1f7fe847f774499d37a2e9`; expected kernel `6.12.92`.
 - Kernel KMI family: `android16-6.12`. This is **not** an Android 17 / `android17-6.18` KMI. The selected 6.12 kernel must be validated against Android 17 userspace on the device; a successful compile does not prove that compatibility.
-- Alioth device support: pinned mainline/postmarketOS patch and config from `nasaarmas/pmaports-alioth`, commit `fef537b30e81c05cd226ca6b13ca3c888c361240`.
+- Alioth device support: pinned mainline/postmarketOS DTS, panel and touchscreen patch from `nasaarmas/pmaports-alioth`, commit `fef537b30e81c05cd226ca6b13ca3c888c361240`. The postmarketOS config is not used as the Android kernel baseline.
 - Root: official KernelSU Next `v3.4.2`, commit `4c706b5938665866ebe16944a481a7b91e3396af`, integrated built-in.
 - Hiding: KernelSU Next's own SUSFS guard LKM, version `2.3.0-gki`, built from the same `v3.4.2` source tree against this exact kernel output. This deliberately uses the LKM architecture shipped by KernelSU Next v3.4.2, not the older Simonpunk inline-patch integration and not nonexistent `CONFIG_KSU_SUSFS` options.
 - Packaging: pinned AnyKernel3 commit `41f04bdb4ee30a44e429c2c1131d5e8bb32b15f1`.
@@ -17,7 +17,7 @@ This is an isolated kernel-port experiment. It does not modify the repository's 
 
 Android Common publishes Android 16 / 6.12, while Android 17's corresponding common-kernel line is 6.18. The selected 6.12 target is kept explicitly labelled as Android16-6.12 KMI; it must not be represented as an Android17 GKI kernel.
 
-The source is Android Common 6.12 plus the alioth mainline DTS, panel and touchscreen support. It is not a generic prebuilt GKI image. The old Redline 4.19.325 kernel and the currently installed ROM are not modified by the build workflow.
+The source is Android Common 6.12, configured from that branch's `arch/arm64/configs/gki_defconfig`, then overlaid with the alioth-specific mainline driver configuration and DTS/panel/touchscreen support. This preserves Android's base facilities, including SELinux and Binder; the postmarketOS defconfig is deliberately not used as an Android baseline. The result is a custom kernel, not a certified prebuilt GKI image. The old Redline 4.19.325 kernel and the currently installed ROM are not modified by the build workflow.
 
 ## KernelSU Next and SUSFS
 
