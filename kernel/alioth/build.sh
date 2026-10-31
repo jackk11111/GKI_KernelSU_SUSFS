@@ -77,23 +77,47 @@ import sys
 
 root = pathlib.Path(sys.argv[1])
 
-def append_once(relative, entry):
+def ensure_single_entry(relative, entry):
     path = root / relative
-    lines = path.read_text().splitlines()
-    if entry not in lines:
-        with path.open("a") as stream:
-            if path.stat().st_size and not path.read_bytes().endswith(b"\n"):
-                stream.write("\n")
-            stream.write(entry + "\n")
-    if path.read_text().splitlines().count(entry) != 1:
-        raise SystemExit(f"Expected exactly one registration in {relative}: {entry}")
-    print(f"REGISTRATION=PASS {relative}: {entry}")
+    lines = path.read_text().splitlines(keepends=True)
+    original_count = sum(line.rstrip("\r\n") == entry for line in lines)
 
-append_once(
+    # Identical repeated Kbuild entries are redundant. Keep the first and
+    # remove only further exact duplicates; preserve every other source line.
+    normalized = []
+    seen = False
+    for line in lines:
+        if line.rstrip("\r\n") == entry:
+            if seen:
+                continue
+            seen = True
+        normalized.append(line)
+
+    if not seen:
+        if normalized and not normalized[-1].endswith("\n"):
+            normalized[-1] += "\n"
+        normalized.append(entry + "\n")
+
+    path.write_text("".join(normalized))
+    final_count = sum(
+        line.rstrip("\r\n") == entry
+        for line in path.read_text().splitlines(keepends=True)
+    )
+    if final_count != 1:
+        raise SystemExit(
+            f"Expected exactly one registration in {relative}; "
+            f"original={original_count}, final={final_count}: {entry}"
+        )
+    print(
+        f"REGISTRATION=PASS {relative}: {entry} "
+        f"(original={original_count}, final={final_count})"
+    )
+
+ensure_single_entry(
     "arch/arm64/boot/dts/qcom/Makefile",
     "dtb-$(CONFIG_ARCH_QCOM) += sm8250-xiaomi-alioth.dtb",
 )
-append_once(
+ensure_single_entry(
     "drivers/gpu/drm/panel/Makefile",
     "obj-$(CONFIG_DRM_PANEL_SAMSUNG_AMS667XX01) += panel-samsung-ams667xx01.o",
 )
