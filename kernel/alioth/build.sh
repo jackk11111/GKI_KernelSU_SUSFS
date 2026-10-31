@@ -50,8 +50,38 @@ echo "== Fetch and verify the alioth mainline device patch =="
 retry curl -fL --retry 4 --retry-delay 3 \
   "$PMA_BASE/$DEVICE_PATCH" -o "$WORK/$DEVICE_PATCH"
 echo "$DEVICE_PATCH_SHA512  $WORK/$DEVICE_PATCH" | sha512sum -c -
-git -C "$KERNEL_DIR" apply --check --verbose "$WORK/$DEVICE_PATCH"
-git -C "$KERNEL_DIR" apply "$WORK/$DEVICE_PATCH"
+# The pinned mainline patch has two one-line Makefile hunks whose surrounding
+# lists were reordered in Android Common 6.18. Apply every other hunk verbatim,
+# then add those two entries idempotently instead of changing source code.
+git -C "$KERNEL_DIR" apply --check --verbose \
+  --exclude=arch/arm64/boot/dts/qcom/Makefile \
+  --exclude=drivers/gpu/drm/panel/Makefile "$WORK/$DEVICE_PATCH"
+git -C "$KERNEL_DIR" apply \
+  --exclude=arch/arm64/boot/dts/qcom/Makefile \
+  --exclude=drivers/gpu/drm/panel/Makefile "$WORK/$DEVICE_PATCH"
+python3 - "$KERNEL_DIR" <<'PY'
+import pathlib
+import sys
+
+root = pathlib.Path(sys.argv[1])
+entries = {
+    "arch/arm64/boot/dts/qcom/Makefile":
+        "dtb-$(CONFIG_ARCH_QCOM) += sm8250-xiaomi-alioth.dtb",
+    "drivers/gpu/drm/panel/Makefile":
+        "obj-$(CONFIG_DRM_PANEL_SAMSUNG_AMS667XX01) += panel-samsung-ams667xx01.o",
+}
+for relative, entry in entries.items():
+    path = root / relative
+    content = path.read_text()
+    if entry not in content.splitlines():
+        with path.open("a") as stream:
+            if content and not content.endswith("\\n"):
+                stream.write("\\n")
+            stream.write(entry + "\\n")
+    if entry not in path.read_text().splitlines():
+        raise SystemExit(f"Failed to register alioth build entry in {relative}")
+    print(f"MAKEFILE_ENTRY=PASS {relative}: {entry}")
+PY
 
 echo "== Fetch and verify the known alioth mainline config =="
 retry curl -fL --retry 4 --retry-delay 3 \
@@ -217,6 +247,7 @@ KERNEL_RELEASE=$KERNEL_RELEASE
 DEVICE_PATCH_REPO=nasaarmas/pmaports-alioth
 DEVICE_PATCH_COMMIT=$PMA_COMMIT
 DEVICE_PATCH_SHA512=$DEVICE_PATCH_SHA512
+DEVICE_PATCH_MAKEFILE_ADAPTATION=two idempotent append-only entries; remaining patch hunks applied verbatim
 PMOS_CONFIG_SHA512=$PMOS_CONFIG_SHA512
 KERNELSU_NEXT_TAG=$KSU_TAG
 KERNELSU_NEXT_COMMIT=$ACTUAL_KSU_COMMIT
