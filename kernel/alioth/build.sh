@@ -7,6 +7,7 @@ KERNEL_DIR="$WORK/kernel"
 OUT="$WORK/out"
 ART="$ROOT/alioth-artifacts"
 ANDROID_COMMON_REF="${ANDROID_COMMON_REF:-android16-6.12-2026-09}"
+ANDROID_COMMON_EXPECTED_COMMIT="5eaaf89e924b6948fd1f7fe847f774499d37a2e9"
 SUSFS_BRANCH="gki-android16-6.12"
 PMA_COMMIT="fef537b30e81c05cd226ca6b13ca3c888c361240"
 PMA_BASE="https://raw.githubusercontent.com/nasaarmas/pmaports-alioth/$PMA_COMMIT/linux-postmarketos-qcom-sm8250-alioth"
@@ -40,6 +41,10 @@ echo "== Source: Android Common Kernel $ANDROID_COMMON_REF =="
 retry git clone --depth=1 --single-branch --branch "$ANDROID_COMMON_REF" \
   https://android.googlesource.com/kernel/common "$KERNEL_DIR"
 ANDROID_COMMON_COMMIT="$(git -C "$KERNEL_DIR" rev-parse HEAD)"
+if [ "$ANDROID_COMMON_COMMIT" != "$ANDROID_COMMON_EXPECTED_COMMIT" ]; then
+  echo "ERROR: Android Common ref moved: expected $ANDROID_COMMON_EXPECTED_COMMIT, got $ANDROID_COMMON_COMMIT" >&2
+  exit 1
+fi
 ANDROID_COMMON_DATE="$(git -C "$KERNEL_DIR" show -s --format=%cI HEAD)"
 KERNEL_VERSION="$(make -s -C "$KERNEL_DIR" ARCH=arm64 kernelversion)"
 KERNEL_SUBLEVEL="${KERNEL_VERSION##*.}"
