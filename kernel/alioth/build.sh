@@ -12,8 +12,6 @@ PMA_COMMIT="fef537b30e81c05cd226ca6b13ca3c888c361240"
 PMA_BASE="https://raw.githubusercontent.com/nasaarmas/pmaports-alioth/$PMA_COMMIT/linux-postmarketos-qcom-sm8250-alioth"
 DEVICE_PATCH="0001-Added-POCO-F3-dts-panel-and-touchscreen-drivers.patch"
 DEVICE_PATCH_SHA512="3155103c7c498ae0d3e00117cefd7364e8b8100aa9cad2967086904d77e2aab16063b60a2d4603b29190c2aa96ac7dc81e9ceda01dadada1f109573897d74ac4"
-PMOS_CONFIG="config-postmarketos-qcom-sm8250-alioth.aarch64"
-PMOS_CONFIG_SHA512="a1a7290178c83125b7bb6ffe70bd447f44002565d59a5ca38bd82ec9f15f2c62ec2a1f44f08ac85c296eedf4f102199c6550a2d8c414a4238d07bdca99da1b96"
 KSU_TAG="v3.4.2"
 KSU_COMMIT="4c706b5938665866ebe16944a481a7b91e3396af"
 AK3_COMMIT="41f04bdb4ee30a44e429c2c1131d5e8bb32b15f1"
@@ -155,11 +153,6 @@ if len(re.findall(r"^" + re.escape(symbol) + r"\s*$", kconfig.read_text(), re.M)
 print("KCONFIG_REGISTRATION=PASS DRM_PANEL_SAMSUNG_AMS667XX01")
 PY
 
-echo "== Fetch and verify the known alioth mainline config =="
-retry curl -fL --retry 4 --retry-delay 3 \
-  "$PMA_BASE/$PMOS_CONFIG" -o "$WORK/$PMOS_CONFIG"
-echo "$PMOS_CONFIG_SHA512  $WORK/$PMOS_CONFIG" | sha512sum -c -
-
 echo "== Integrate official KernelSU Next $KSU_TAG =="
 retry git clone --depth=1 --branch "$KSU_TAG" \
   https://github.com/KernelSU-Next/KernelSU-Next.git "$WORK/KernelSU-Next"
@@ -183,16 +176,28 @@ test "$SUSFS_ABI_VERSION" = "v2.3.0"
 echo "SUSFS_VERSION=$SUSFS_VERSION"
 echo "SUSFS_ABI_VERSION=$SUSFS_ABI_VERSION"
 
-echo "== Configure Android + alioth + KSU/SUSFS =="
+echo "== Configure Android Common GKI baseline + alioth device overlay =="
 mkdir -p "$OUT"
-cp "$WORK/$PMOS_CONFIG" "$OUT/.config"
 make -C "$KERNEL_DIR" O="$OUT" ARCH=arm64 LLVM=-21 LLVM_IAS=1 \
-  CC=clang-21 HOSTCC=clang-21 olddefconfig
-
+  CC=clang-21 HOSTCC=clang-21 gki_defconfig
 "$KERNEL_DIR/scripts/kconfig/merge_config.sh" -m -O "$OUT" \
   "$OUT/.config" "$ROOT/kernel/alioth/alioth.config"
 make -C "$KERNEL_DIR" O="$OUT" ARCH=arm64 LLVM=-21 LLVM_IAS=1 \
   CC=clang-21 HOSTCC=clang-21 olddefconfig
+grep -qx 'CONFIG_SECURITY_SELINUX=y' "$OUT/.config" || {
+  echo "ERROR: Android SELinux is not enabled in the final kernel config" >&2
+  exit 1
+}
+grep -q '^CONFIG_LSM=.*selinux' "$OUT/.config" || {
+  echo "ERROR: selinux is missing from the active LSM list" >&2
+  grep '^CONFIG_LSM=' "$OUT/.config" || true
+  exit 1
+}
+grep -qx '# CONFIG_MODULE_SIG is not set' "$OUT/.config" || {
+  echo "ERROR: module signature policy is not the unsigned custom-kernel policy required for the source-built SUSFS LKM" >&2
+  grep -E '^CONFIG_MODULE_SIG|^# CONFIG_MODULE_SIG' "$OUT/.config" || true
+  exit 1
+}
 
 require_y() {
   local symbol="$1"
@@ -370,6 +375,7 @@ cat > "$ART/BuildInfo.txt" <<INFO
 DEVICE=POCO F3 (alioth)
 ROM_TARGET=Evolution X Android 17 userspace
 KERNEL_BASE=Android Common android16-6.12
+BASE_DEFCONFIG=gki_defconfig
 KERNEL_COMMON_KMI=android16-6.12
 ANDROID_COMMON_REF=$ANDROID_COMMON_REF
 ANDROID_COMMON_COMMIT=$ANDROID_COMMON_COMMIT
@@ -380,8 +386,7 @@ KERNEL_RELEASE=$KERNEL_RELEASE
 DEVICE_PATCH_REPO=nasaarmas/pmaports-alioth
 DEVICE_PATCH_COMMIT=$PMA_COMMIT
 DEVICE_PATCH_SHA512=$DEVICE_PATCH_SHA512
-DEVICE_PATCH_MAKEFILE_ADAPTATION=two idempotent append-only entries; remaining patch hunks applied verbatim
-PMOS_CONFIG_SHA512=$PMOS_CONFIG_SHA512
+DEVICE_PATCH_MAKEFILE_ADAPTATION=two Kbuild entries and one panel Kconfig symbol inserted idempotently; remaining patch hunks applied verbatim
 KERNELSU_NEXT_TAG=$KSU_TAG
 KERNELSU_NEXT_COMMIT=$ACTUAL_KSU_COMMIT
 SUSFS_VERSION=$SUSFS_VERSION
