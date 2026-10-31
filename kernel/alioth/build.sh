@@ -6,8 +6,8 @@ WORK="${RUNNER_TEMP:-/tmp}/alioth-kernel-build"
 KERNEL_DIR="$WORK/kernel"
 OUT="$WORK/out"
 ART="$ROOT/alioth-artifacts"
-ANDROID_COMMON_REF="${ANDROID_COMMON_REF:-android17-6.18}"
-SUSFS_BRANCH="gki-android17-6.18"
+ANDROID_COMMON_REF="${ANDROID_COMMON_REF:-android16-6.12-2026-09}"
+SUSFS_BRANCH="gki-android16-6.12"
 PMA_COMMIT="fef537b30e81c05cd226ca6b13ca3c888c361240"
 PMA_BASE="https://raw.githubusercontent.com/nasaarmas/pmaports-alioth/$PMA_COMMIT/linux-postmarketos-qcom-sm8250-alioth"
 DEVICE_PATCH="0001-Added-POCO-F3-dts-panel-and-touchscreen-drivers.patch"
@@ -42,9 +42,12 @@ retry git clone --depth=1 --single-branch --branch "$ANDROID_COMMON_REF" \
 ANDROID_COMMON_COMMIT="$(git -C "$KERNEL_DIR" rev-parse HEAD)"
 ANDROID_COMMON_DATE="$(git -C "$KERNEL_DIR" show -s --format=%cI HEAD)"
 KERNEL_VERSION="$(make -s -C "$KERNEL_DIR" ARCH=arm64 kernelversion)"
+KERNEL_SUBLEVEL="${KERNEL_VERSION##*.}"
 echo "ANDROID_COMMON_COMMIT=$ANDROID_COMMON_COMMIT"
 echo "ANDROID_COMMON_DATE=$ANDROID_COMMON_DATE"
-echo "KERNEL_VERSION=$KERNEL_VERSION"
+echo "KERNEL_VERSION=$KERNEL_VERSION
+KERNEL_SUBLEVEL=$KERNEL_SUBLEVEL"
+echo "KERNEL_SUBLEVEL=$KERNEL_SUBLEVEL"
 
 echo "== Fetch and verify the alioth mainline device patch =="
 retry curl -fL --retry 4 --retry-delay 3 \
@@ -100,17 +103,134 @@ grep -qF 'obj-$(CONFIG_KSU) += kernelsu/' "$KERNEL_DIR/drivers/Makefile" || \
 grep -qF 'source "drivers/kernelsu/Kconfig"' "$KERNEL_DIR/drivers/Kconfig" || \
   sed -i '/^endmenu/i source "drivers/kernelsu/Kconfig"' "$KERNEL_DIR/drivers/Kconfig"
 
-echo "== Integrate SUSFS 2.3.0 for Android 17 / 6.18 =="
+echo "== Integrate SUSFS for Android16-6.12 (Evolution X Android17 userspace) =="
 retry git clone --depth=1 --single-branch --branch "$SUSFS_BRANCH" \
   https://gitlab.com/simonpunk/susfs4ksu.git "$WORK/susfs4ksu"
 SUSFS_COMMIT="$(git -C "$WORK/susfs4ksu" rev-parse HEAD)"
-SUSFS_PATCH="$WORK/susfs4ksu/kernel_patches/50_add_susfs_in_gki-android17-6.18.patch"
+SUSFS_DESCRIBE="$(git -C "$WORK/susfs4ksu" describe --tags --always 2>/dev/null || git -C "$WORK/susfs4ksu" rev-parse --short HEAD)"
+SUSFS_PATCH="$WORK/susfs4ksu/kernel_patches/50_add_susfs_in_gki-android16-6.12.patch"
 test -s "$SUSFS_PATCH"
 test -d "$WORK/susfs4ksu/kernel_patches/fs"
 test -d "$WORK/susfs4ksu/kernel_patches/include/linux"
 cp -av "$WORK/susfs4ksu/kernel_patches/fs/"* "$KERNEL_DIR/fs/"
 cp -av "$WORK/susfs4ksu/kernel_patches/include/linux/"* "$KERNEL_DIR/include/linux/"
 patch --batch --forward -p1 -d "$KERNEL_DIR" < "$SUSFS_PATCH"
+
+# Restore the temporary 6.12 patch-context transforms before compiling.
+if [ "$KERNEL_SUBLEVEL" -ge 92 ]; then
+  python3 "$ROOT/.github/scripts/susfs_fake_612.py" \
+    "$KERNEL_DIR/fs/proc/task_mmu.c" revert
+fi
+
+if [ "$KERNEL_SUBLEVEL" -ge 69 ]; then
+  python3 - "$KERNEL_DIR/fs/proc/task_mmu.c" "$VMA_RENAME_STATE" <<'PY'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+count = int(pathlib.Path(sys.argv[2]).read_text().strip() or "0")
+text = path.read_text()
+if count:
+    if text.count("vma_pages") < count:
+        raise SystemExit("cannot restore the original vma_data_pages tokens")
+    text = text.replace("vma_pages", "vma_data_pages", count)
+    path.write_text(text)
+print(f"SUSFS_FAKE_VMA_DATA_PAGES_RESTORED={count}")
+PY
+fi
+
+if [ "$KERNEL_SUBLEVEL" -ge 58 ] && [ -s "$DMA_INCLUDE_STATE" ]; then
+  python3 - "$KERNEL_DIR/fs/exec.c" "$DMA_INCLUDE_STATE" <<'PY'
+import json
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+state = json.loads(pathlib.Path(sys.argv[2]).read_text())
+needle = "#include <linux/dma-buf.h>"
+if state.get("removed"):
+    lines = path.read_text().splitlines(keepends=True)
+    count = sum(line.strip() == needle for line in lines)
+    if count == 0:
+        before = state.get("before")
+        after = state.get("after")
+        before_hits = [i for i, line in enumerate(lines) if line.rstrip("\n") == before] if before else []
+        after_hits = [i for i, line in enumerate(lines) if line.rstrip("\n") == after] if after else []
+        if len(before_hits) == 1:
+            insert_at = before_hits[0] + 1
+        elif len(after_hits) == 1:
+            insert_at = after_hits[0]
+        else:
+            raise SystemExit("cannot restore linux/dma-buf.h at its original include position")
+        lines.insert(insert_at, needle + "\n")
+        path.write_text("".join(lines))
+    elif count != 1:
+        raise SystemExit(f"expected one restored {needle}, found {count}")
+print(f"SUSFS_FAKE_EXEC_DMA_INCLUDE_RESTORED={state.get('removed', False)}")
+PY
+fi
+
+TASK_MMU="$KERNEL_DIR/fs/proc/task_mmu.c"
+if grep -q 'VMA_PAD_START(' "$TASK_MMU" && \
+   ! grep -qE '#include <linux/pgsize_migration(_inline)?\.h>|define VMA_PAD_START' "$TASK_MMU"; then
+  sed -i '1a #ifndef VMA_PAD_START\n#define VMA_PAD_START(vma) ((vma)->vm_end)\n#endif' "$TASK_MMU"
+  echo "SUSFS_VMA_PAD_START_FALLBACK=ADDED"
+fi
+
+# Android 16 / 6.12 SUSFS compatibility transforms. These mirror the
+# already-maintained 6.12 path in .github/actions/susfs-patches and
+# susfs-revert-patches. The temporary edits exist only to match patch context.
+DMA_INCLUDE_STATE="$WORK/exec_dma_include.json"
+VMA_RENAME_STATE="$WORK/vma_data_pages.count"
+
+if [ "$KERNEL_SUBLEVEL" -ge 58 ]; then
+  python3 - "$KERNEL_DIR/fs/exec.c" "$DMA_INCLUDE_STATE" <<'PY'
+import json
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+state_path = pathlib.Path(sys.argv[2])
+lines = path.read_text().splitlines(keepends=True)
+needle = "#include <linux/dma-buf.h>"
+matches = [i for i, line in enumerate(lines) if line.strip() == needle]
+if len(matches) > 1:
+    raise SystemExit(f"expected at most one {needle}, found {len(matches)}")
+state = {"removed": False}
+if matches:
+    index = matches[0]
+    state = {
+        "removed": True,
+        "before": lines[index - 1].rstrip("\n") if index > 0 else None,
+        "after": lines[index + 1].rstrip("\n") if index + 1 < len(lines) else None,
+    }
+    del lines[index]
+    path.write_text("".join(lines))
+state_path.write_text(json.dumps(state))
+print(f"SUSFS_FAKE_EXEC_DMA_INCLUDE_REMOVED={state['removed']}")
+PY
+fi
+
+if [ "$KERNEL_SUBLEVEL" -ge 69 ]; then
+  python3 - "$KERNEL_DIR/fs/proc/task_mmu.c" "$VMA_RENAME_STATE" <<'PY'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+text = path.read_text()
+count = text.count("vma_data_pages")
+if count:
+    path.write_text(text.replace("vma_data_pages", "vma_pages"))
+pathlib.Path(sys.argv[2]).write_text(str(count))
+print(f"SUSFS_FAKE_VMA_DATA_PAGES_RENAMES={count}")
+PY
+fi
+
+if [ "$KERNEL_SUBLEVEL" -ge 92 ]; then
+  python3 "$ROOT/.github/scripts/susfs_fake_612.py" \
+    "$KERNEL_DIR/fs/proc/task_mmu.c" apply
+fi
+
 
 echo "== Configure Android + alioth + KSU/SUSFS =="
 mkdir -p "$OUT"
@@ -181,9 +301,9 @@ rm -rf "$WORK/AnyKernel3/.git"
 cp "$ART/Image-dtb" "$WORK/AnyKernel3/Image-dtb"
 
 cat > "$WORK/AnyKernel3/anykernel.sh" <<'AK3'
-### POCO F3 (alioth) experimental Android 17 / Linux 6.18 kernel
+### POCO F3 (alioth) EvoX Android 17 userspace / Android16-6.12 kernel
 properties() { '
-kernel.string=Alioth Android17 Linux 6.18 | KernelSU Next v3.4.2 | SUSFS 2.3.0
+kernel.string=Alioth EvoX A17 | android16-6.12 | KernelSU Next v3.4.2 | SUSFS 2.3.0
 do.devicecheck=1
 do.modules=0
 do.systemless=0
@@ -230,7 +350,7 @@ AK3
 
 (
   cd "$WORK/AnyKernel3"
-  zip -qr "$ART/Alioth-Android17-6.18-KSU-Next-v3.4.2-SUSFS-2.3.0.zip" .
+  zip -qr "$ART/Alioth-EvoX-Android17-android16-6.12-KSU-Next-v3.4.2-SUSFS-2.3.0.zip" .
 )
 
 echo "== Fetch matching KernelSU Next manager =="
@@ -239,6 +359,9 @@ echo "$MANAGER_SHA256  $ART/KernelSU_Next_v3.4.2_33355-release.apk" | sha256sum 
 
 cat > "$ART/BuildInfo.txt" <<INFO
 DEVICE=POCO F3 (alioth)
+ROM_TARGET=Evolution X Android 17 userspace
+KERNEL_BASE=Android Common android16-6.12
+KERNEL_COMMON_KMI=android16-6.12
 ANDROID_COMMON_REF=$ANDROID_COMMON_REF
 ANDROID_COMMON_COMMIT=$ANDROID_COMMON_COMMIT
 ANDROID_COMMON_COMMIT_DATE=$ANDROID_COMMON_DATE
@@ -253,6 +376,7 @@ KERNELSU_NEXT_TAG=$KSU_TAG
 KERNELSU_NEXT_COMMIT=$ACTUAL_KSU_COMMIT
 SUSFS_BRANCH=$SUSFS_BRANCH
 SUSFS_COMMIT=$SUSFS_COMMIT
+SUSFS_DESCRIBE=$SUSFS_DESCRIBE
 ANYKERNEL3_COMMIT=$AK3_COMMIT
 MANAGER_SHA256=$MANAGER_SHA256
 CONFIG_KSU=y
