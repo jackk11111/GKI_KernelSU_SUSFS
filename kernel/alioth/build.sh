@@ -52,37 +52,77 @@ echo "== Fetch and verify the alioth mainline device patch =="
 retry curl -fL --retry 4 --retry-delay 3 \
   "$PMA_BASE/$DEVICE_PATCH" -o "$WORK/$DEVICE_PATCH"
 echo "$DEVICE_PATCH_SHA512  $WORK/$DEVICE_PATCH" | sha512sum -c -
-# The pinned mainline patch has two one-line Makefile hunks whose surrounding
-# lists can differ between Android Common release branches. Apply every other hunk verbatim,
-# then add those two entries idempotently instead of changing source code.
+# The pinned mainline patch has context-only hunks in Android Common Kconfig
+# and Makefiles. Apply the DTS, driver sources and touchscreen Kconfig verbatim;
+# add the three registration entries using checked semantic anchors.
 git -C "$KERNEL_DIR" apply --check --verbose \
   --exclude=arch/arm64/boot/dts/qcom/Makefile \
+  --exclude=drivers/gpu/drm/panel/Kconfig \
   --exclude=drivers/gpu/drm/panel/Makefile "$WORK/$DEVICE_PATCH"
 git -C "$KERNEL_DIR" apply \
   --exclude=arch/arm64/boot/dts/qcom/Makefile \
+  --exclude=drivers/gpu/drm/panel/Kconfig \
   --exclude=drivers/gpu/drm/panel/Makefile "$WORK/$DEVICE_PATCH"
 python3 - "$KERNEL_DIR" <<'PY'
 import pathlib
+import re
 import sys
 
 root = pathlib.Path(sys.argv[1])
-entries = {
-    "arch/arm64/boot/dts/qcom/Makefile":
-        "dtb-$(CONFIG_ARCH_QCOM) += sm8250-xiaomi-alioth.dtb",
-    "drivers/gpu/drm/panel/Makefile":
-        "obj-$(CONFIG_DRM_PANEL_SAMSUNG_AMS667XX01) += panel-samsung-ams667xx01.o",
-}
-for relative, entry in entries.items():
+
+def append_once(relative, entry):
     path = root / relative
-    content = path.read_text()
-    if entry not in content.splitlines():
+    lines = path.read_text().splitlines()
+    if entry not in lines:
         with path.open("a") as stream:
-            if content and not content.endswith("\n"):
-                stream.write("\n")
-            stream.write(entry + "\n")
-    if entry not in path.read_text().splitlines():
-        raise SystemExit(f"Failed to register alioth build entry in {relative}")
-    print(f"MAKEFILE_ENTRY=PASS {relative}: {entry}")
+            if path.stat().st_size and not path.read_bytes().endswith(b"\\n"):
+                stream.write("\\n")
+            stream.write(entry + "\\n")
+    if path.read_text().splitlines().count(entry) != 1:
+        raise SystemExit(f"Expected exactly one registration in {relative}: {entry}")
+    print(f"REGISTRATION=PASS {relative}: {entry}")
+
+append_once(
+    "arch/arm64/boot/dts/qcom/Makefile",
+    "dtb-$(CONFIG_ARCH_QCOM) += sm8250-xiaomi-alioth.dtb",
+)
+append_once(
+    "drivers/gpu/drm/panel/Makefile",
+    "obj-$(CONFIG_DRM_PANEL_SAMSUNG_AMS667XX01) += panel-samsung-ams667xx01.o",
+)
+
+kconfig = root / "drivers/gpu/drm/panel/Kconfig"
+text = kconfig.read_text()
+symbol = "config DRM_PANEL_SAMSUNG_AMS667XX01"
+if len(re.findall(r"^" + re.escape(symbol) + r"\\s*$", text, re.M)) > 1:
+    raise SystemExit("Duplicate DRM_PANEL_SAMSUNG_AMS667XX01 Kconfig symbol")
+if not re.search(r"^" + re.escape(symbol) + r"\\s*$", text, re.M):
+    anchors = list(re.finditer(
+        r"^config DRM_PANEL_SAMSUNG_AMS639RQ08\\s*$", text, re.M
+    ))
+    if len(anchors) != 1:
+        raise SystemExit(
+            f"Expected one AMS639RQ08 Kconfig anchor, found {len(anchors)}"
+        )
+    next_symbol = re.search(r"^config [A-Z0-9_]+\\s*$", text[anchors[0].end():], re.M)
+    if not next_symbol:
+        raise SystemExit("Could not find next Kconfig symbol after AMS639RQ08")
+    insert_at = anchors[0].end() + next_symbol.start()
+    block = (
+        "config DRM_PANEL_SAMSUNG_AMS667XX01\\n"
+        '\\ttristate "Samsung AMS667XX01 panel"\\n'
+        "\\tdepends on OF\\n"
+        "\\tdepends on DRM_MIPI_DSI\\n"
+        "\\tdepends on BACKLIGHT_CLASS_DEVICE\\n"
+        "\\thelp\\n"
+        "\\t  Say Y or M here to enable the Samsung AMS667XX01 FHD Plus\\n"
+        "\\t  (2400x1080@120Hz) CMD mode panel used by the POCO F3.\\n"
+        "\\n"
+    )
+    kconfig.write_text(text[:insert_at] + block + text[insert_at:])
+if len(re.findall(r"^" + re.escape(symbol) + r"\\s*$", kconfig.read_text(), re.M)) != 1:
+    raise SystemExit("Alioth panel Kconfig registration missing or duplicated")
+print("KCONFIG_REGISTRATION=PASS DRM_PANEL_SAMSUNG_AMS667XX01")
 PY
 
 echo "== Fetch and verify the known alioth mainline config =="
