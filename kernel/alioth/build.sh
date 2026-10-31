@@ -66,6 +66,8 @@ git -C "$KERNEL_DIR" apply \
   --exclude=drivers/gpu/drm/panel/Kconfig \
   --exclude=drivers/gpu/drm/panel/Makefile "$WORK/$DEVICE_PATCH"
 
+echo "== Backport PM8150B power drivers and adapt the panel to Android Common 6.12 =="
+bash "$ROOT/kernel/alioth/compat-patches.sh" "$KERNEL_DIR" "$WORK"
 
 python3 - "$KERNEL_DIR" <<'PY'
 import pathlib
@@ -209,6 +211,8 @@ require_y() {
 }
 for symbol in \
   KSU ANDROID_BINDER_IPC ANDROID_BINDERFS \
+  POWER_SUPPLY IIO SPMI SPMI_MSM_PMIC_ARB MFD_SPMI_PMIC \
+  CHARGER_QCOM_SMB5 BATTERY_QCOM_FG \
   DRM_MSM DRM_PANEL_SAMSUNG_AMS667XX01 TOUCHSCREEN_FT8756 \
   SCSI_UFSHCD SCSI_UFS_QCOM F2FS_FS EROFS_FS \
   WLAN WLAN_VENDOR_ATH RFKILL CFG80211 MAC80211 ATH11K ATH11K_PCI MHI_BUS MHI_BUS_PCI_GENERIC \
@@ -219,6 +223,15 @@ for symbol in \
   SND_SOC_CS35L41_I2C SND_SOC_QDSP6; do
   require_y "$symbol"
 done
+
+echo "== Fast device preflight: Alioth DTS, panel and PM8150B power drivers =="
+make -C "$KERNEL_DIR" O="$OUT" ARCH=arm64 LLVM=-21 LLVM_IAS=1 \
+  CC=clang-21 HOSTCC=clang-21 \
+  arch/arm64/boot/dts/qcom/sm8250-xiaomi-alioth.dtb \
+  drivers/gpu/drm/panel/panel-samsung-ams667xx01.o \
+  drivers/power/supply/qcom_fg.o \
+  drivers/power/supply/qcom_pm8150b_charger.o
+echo "DEVICE_PREFLIGHT=PASS"
 
 KERNEL_RELEASE="$(make -s -C "$KERNEL_DIR" O="$OUT" ARCH=arm64 LLVM=-21 \
   CC=clang-21 HOSTCC=clang-21 LOCALVERSION=-alioth-a17 kernelrelease)"
