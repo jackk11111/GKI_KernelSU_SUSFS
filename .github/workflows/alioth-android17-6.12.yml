@@ -71,6 +71,54 @@ jobs:
           grep -q '^CONFIG_KSU=y$' kernel/alioth/alioth.config
           ! grep -q 'CONFIG_KSU_SUSFS' kernel/alioth/alioth.config
           grep -q 'android16-6.12-2026-09' kernel/alioth/build.sh
+          grep -q 'gki_defconfig' kernel/alioth/build.sh
+          grep -q '^CONFIG_SECURITY_SELINUX=y
+          grep -q 'kernel/susfs' kernel/alioth/build.sh
+          ! grep -q 'susfs4ksu.git' kernel/alioth/build.sh
+          ! grep -q 'android17-6.18' kernel/alioth/build.sh
+          echo "STATIC_PREFLIGHT=PASS"
+
+      - name: Build kernel and flashable test package
+        shell: bash
+        env:
+          ANDROID_COMMON_REF: android16-6.12-2026-09
+        run: |
+          set -euo pipefail
+          bash kernel/alioth/build.sh
+
+      - name: Upload kernel artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: POCO-F3-alioth-EvoX-Android17-android16-6.12-KSU-Next-3.4.2-SUSFS
+          path: alioth-artifacts/*
+          if-no-files-found: error
+          retention-days: 14
+ kernel/alioth/alioth.config
+          grep -q '^# CONFIG_MODULE_SIG is not set
+          grep -q 'kernel/susfs' kernel/alioth/build.sh
+          ! grep -q 'susfs4ksu.git' kernel/alioth/build.sh
+          ! grep -q 'android17-6.18' kernel/alioth/build.sh
+          echo "STATIC_PREFLIGHT=PASS"
+
+      - name: Build kernel and flashable test package
+        shell: bash
+        env:
+          ANDROID_COMMON_REF: android16-6.12-2026-09
+        run: |
+          set -euo pipefail
+          bash kernel/alioth/build.sh
+
+      - name: Upload kernel artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: POCO-F3-alioth-EvoX-Android17-android16-6.12-KSU-Next-3.4.2-SUSFS
+          path: alioth-artifacts/*
+          if-no-files-found: error
+          retention-days: 14
+ kernel/alioth/alioth.config
+          ! grep -q 'PMOS_CONFIG' kernel/alioth/build.sh
           grep -q '2.3.0-gki' kernel/alioth/build.sh
           grep -q 'kernel/susfs' kernel/alioth/build.sh
           ! grep -q 'susfs4ksu.git' kernel/alioth/build.sh
