@@ -122,7 +122,7 @@ ensure_single_entry(
 kconfig = root / "drivers/gpu/drm/panel/Kconfig"
 text = kconfig.read_text()
 symbol = "config DRM_PANEL_SAMSUNG_AMS667XX01"
-symbol_re = r"^" + re.escape(symbol) + r"\\s*$"
+symbol_re = r"^" + re.escape(symbol) + r"\s*$"
 matches = list(re.finditer(symbol_re, text, re.M))
 if len(matches) > 1:
     raise SystemExit("Duplicate DRM_PANEL_SAMSUNG_AMS667XX01 Kconfig symbol")
@@ -130,22 +130,22 @@ if not matches:
     # Android Common 6.12 does not contain the newer AMS639RQ08 symbol
     # used as context by the postmarketOS patch. Use the stable panel-menu
     # boundary present in both trees instead of depending on another panel.
-    menu_anchor = 'menu "Display Panels"\\n\\tdepends on DRM && DRM_PANEL\\n'
+    menu_anchor = 'menu "Display Panels"\n\tdepends on DRM && DRM_PANEL\n'
     if text.count(menu_anchor) != 1:
         raise SystemExit(
             f"Expected one stable Display Panels Kconfig anchor, found {text.count(menu_anchor)}"
         )
     insert_at = text.index(menu_anchor) + len(menu_anchor)
     block = (
-        "\\nconfig DRM_PANEL_SAMSUNG_AMS667XX01\\n"
-        '\\ttristate "Samsung AMS667XX01 panel"\\n'
-        "\\tdepends on OF\\n"
-        "\\tdepends on DRM_MIPI_DSI\\n"
-        "\\tdepends on BACKLIGHT_CLASS_DEVICE\\n"
-        "\\thelp\\n"
-        "\\t  Say Y or M here to enable the Samsung AMS667XX01 FHD Plus\\n"
-        "\\t  (2400x1080@120Hz) CMD mode panel used by the POCO F3.\\n"
-        "\\n"
+        "\nconfig DRM_PANEL_SAMSUNG_AMS667XX01\n"
+        '\ttristate "Samsung AMS667XX01 panel"\n'
+        "\tdepends on OF\n"
+        "\tdepends on DRM_MIPI_DSI\n"
+        "\tdepends on BACKLIGHT_CLASS_DEVICE\n"
+        "\thelp\n"
+        "\t  Say Y or M here to enable the Samsung AMS667XX01 FHD Plus\n"
+        "\t  (2400x1080@120Hz) CMD mode panel used by the POCO F3.\n"
+        "\n"
     )
     kconfig.write_text(text[:insert_at] + block + text[insert_at:])
 if len(re.findall(symbol_re, kconfig.read_text(), re.M)) != 1:
